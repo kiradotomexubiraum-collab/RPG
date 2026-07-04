@@ -384,15 +384,20 @@ textarea { resize: vertical; }
 }
 
 .char-list-item {
+  background: var(--paper-dark);
+  border-radius: 5px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.char-list-open {
   width: 100%;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: var(--paper-dark);
+  background: transparent;
   border: none;
-  border-radius: 5px;
-  padding: 12px 14px;
-  margin-bottom: 8px;
+  padding: 2px 0;
   font-family: 'Crimson Text', serif;
   font-size: 16px;
   color: var(--ink-text);
@@ -400,8 +405,41 @@ textarea { resize: vertical; }
   text-align: left;
 }
 
-.char-list-item:hover { background: #d0c6a8; }
+.char-list-open:hover { opacity: 0.75; }
 .char-list-arrow { opacity: 0.5; }
+
+.btn-copy-id {
+  background: transparent;
+  border: none;
+  color: var(--teal);
+  font-size: 11px;
+  font-family: 'Special Elite', monospace;
+  padding: 4px 0 0;
+  cursor: pointer;
+  opacity: 0.75;
+}
+.btn-copy-id:hover { opacity: 1; text-decoration: underline; }
+
+.btn-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(47, 79, 74, 0.12);
+  border: 1px solid var(--teal);
+  color: var(--teal);
+  font-family: 'Special Elite', monospace;
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+.btn-add:hover { background: rgba(47, 79, 74, 0.22); }
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .save-indicator {
   font-family: 'Special Elite', monospace;
@@ -471,4 +509,3 @@ textarea { resize: vertical; }
 }
 
 .members-list li { padding: 4px 0; }
-  
