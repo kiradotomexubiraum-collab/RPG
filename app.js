@@ -450,4 +450,512 @@ function renderResources() {
       <div class="bar-block">
         <div class="bar-top">
           <span class="field-label" style="margin:0;">${label}</span>
-      
+          <span style="font-family:'Special Elite',monospace;font-size:13px;">${current} / ${max}</span>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
+        <div class="bar-inputs">
+          <span>atual</span>
+          <input type="number" data-bind="resources.${currentKey}" data-numeric="true" value="${current}" />
+          <span>máx.</span>
+          <input type="number" data-bind="resources.${maxKey}" data-numeric="true" value="${max}" />
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="level-row">
+      <div>
+        <span class="field-label" style="display:block;">Nível</span>
+        <div class="level-number">${r.level}</div>
+      </div>
+      <button class="btn btn-stamp" data-action="level-up">Subir Nível</button>
+    </div>
+    ${bar("HP", "hpCurrent", "hpMax", "var(--stamp)")}
+    ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}`;
+}
+
+function renderSkills() {
+  const rows = character.skills
+    .map(
+      (s) => `
+      <div class="skill-row" data-id="${s.id}">
+        <input type="text" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" />
+        <input type="number" class="bonus" data-list="skills" data-id="${s.id}" data-field="bonus" data-numeric="true" value="${s.bonus}" />
+        <input type="text" class="dice" data-list="skills" data-id="${s.id}" data-field="dice" value="${esc(s.dice)}" />
+        <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar">${ICONS.dice}</button>
+        <button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>
+      </div>`
+    )
+    .join("");
+  return `${rows}<button class="btn-link" data-action="add-skill" style="margin-top:10px;">+ adicionar perícia</button>`;
+}
+
+function renderAbilities() {
+  const cards = character.abilities
+    .map(
+      (a) => `
+      <div class="card-box" data-id="${a.id}">
+        <div class="card-box-header">
+          <input type="text" data-list="abilities" data-id="${a.id}" data-field="name" value="${esc(a.name)}" />
+          <button class="trash-btn" data-action="remove" data-list="abilities" data-id="${a.id}">${ICONS.trash}</button>
+        </div>
+        <textarea rows="2" data-list="abilities" data-id="${a.id}" data-field="description" placeholder="Descrição da habilidade...">${esc(a.description)}</textarea>
+      </div>`
+    )
+    .join("");
+  return `${cards}<button class="btn-link" data-action="add-ability">+ adicionar habilidade</button>`;
+}
+
+function renderItems() {
+  const cards = character.items
+    .map(
+      (it) => `
+      <div class="card-box" data-id="${it.id}">
+        <div class="card-box-header">
+          <input type="text" data-list="items" data-id="${it.id}" data-field="name" value="${esc(it.name)}" />
+          <button class="trash-btn" data-action="remove" data-list="items" data-id="${it.id}">${ICONS.trash}</button>
+        </div>
+        <textarea rows="2" data-list="items" data-id="${it.id}" data-field="description" placeholder="Descrição do item...">${esc(it.description)}</textarea>
+        <div class="item-attack-row">
+          <input type="text" data-list="items" data-id="${it.id}" data-field="attackRoll" placeholder="Rolagem de ataque (ex: 1d8+2)" value="${esc(it.attackRoll)}" />
+          <input type="text" class="crit" data-list="items" data-id="${it.id}" data-field="critRange" placeholder="Crítico" value="${esc(it.critRange)}" />
+          ${it.attackRoll ? `<button class="dice-btn" data-action="roll-item" data-id="${it.id}" title="Rolar">${ICONS.dice}</button>` : ""}
+        </div>
+      </div>`
+    )
+    .join("");
+  return `${cards}<button class="btn-link" data-action="add-item">+ adicionar item</button>`;
+}
+
+function renderAttacks() {
+  const rows = character.attacks
+    .map(
+      (a) => `
+      <div class="attack-row" data-id="${a.id}">
+        <input type="text" data-list="attacks" data-id="${a.id}" data-field="name" value="${esc(a.name)}" style="flex:1;font-weight:600;" />
+        <input type="text" class="dice" data-list="attacks" data-id="${a.id}" data-field="dice" value="${esc(a.dice)}" />
+        <input type="text" data-list="attacks" data-id="${a.id}" data-field="critRange" value="${esc(a.critRange)}" style="width:60px;text-align:center;" />
+        <button class="dice-btn" data-action="roll-attack" data-id="${a.id}" title="Rolar">${ICONS.dice}</button>
+        <button class="trash-btn" data-action="remove" data-list="attacks" data-id="${a.id}">${ICONS.trash}</button>
+      </div>`
+    )
+    .join("");
+  return `${rows}<button class="btn-link" data-action="add-attack" style="margin-top:10px;">+ adicionar ataque</button>`;
+}
+
+function renderTabContent() {
+  switch (activeTab) {
+    case "basic": return renderBasic();
+    case "class": return renderClass();
+    case "resources": return renderResources();
+    case "skills": return renderSkills();
+    case "abilities": return renderAbilities();
+    case "items": return renderItems();
+    case "attacks": return renderAttacks();
+    default: return "";
+  }
+}
+
+function renderSheet() {
+  const tabsHtml = TABS.map(
+    (t) => `
+    <button class="tab-btn ${activeTab === t.id ? "active" : ""}" data-tab="${t.id}">
+      ${ICONS[t.icon]} ${t.label}
+    </button>`
+  ).join("");
+
+  return `
+    <div class="sheet">
+      <div class="sheet-header">
+        <div>
+          <div class="eyebrow">Arquivo da Ordem — Ficha de Campo</div>
+          <h1 class="char-name">${esc(character.basic.name)}</h1>
+          <div id="save-indicator" class="save-indicator"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+          <span class="stamp">confidencial</span>
+          <button class="btn-link" data-action="back-to-list">← meus personagens</button>
+        </div>
+      </div>
+      <div class="tabs">${tabsHtml}</div>
+      <div class="tab-content">${renderTabContent()}</div>
+    </div>`;
+}
+
+function renderToast() {
+  if (!toast) return "";
+  return `
+    <div class="toast">
+      <div class="toast-label">${esc(toast.label)}</div>
+      <div class="toast-roll">${esc(toast.roll)}</div>
+      ${toast.total !== null ? `<div class="toast-total">${toast.total}</div>` : ""}
+    </div>`;
+}
+
+// ---------- Render principal ----------
+function render() {
+  const app = document.getElementById("app");
+  let html = "";
+  if (screen === "loading") html = renderLoading();
+  else if (screen === "login") html = renderLogin();
+  else if (screen === "list") html = renderList();
+  else if (screen === "campaigns") html = renderCampaigns();
+  else if (screen === "campaign-dashboard") html = renderCampaignDashboard();
+  else if (screen === "sheet") html = renderSheet();
+
+  app.innerHTML = html + renderToast();
+  attachEvents();
+  if (screen === "sheet") updateSaveIndicator();
+}
+
+// ---------- Ações de tela ----------
+async function goToList() {
+  screen = "list";
+  listError = "";
+  render();
+  try {
+    const user = getStoredUser();
+    const files = await listDirectory(`users/${user.login}/characters`);
+    const jsonFiles = files.filter((f) => f.name.endsWith(".json"));
+    const withNames = await Promise.all(
+      jsonFiles.map(async (f) => {
+        try {
+          const result = await readJsonFile(f.path);
+          return { id: f.name.replace(".json", ""), name: result?.data?.basic?.name || f.name, path: f.path };
+        } catch {
+          return { id: f.name.replace(".json", ""), name: f.name, path: f.path };
+        }
+      })
+    );
+    characterList = withNames;
+  } catch (err) {
+    listError = "Não foi possível carregar seus personagens: " + (err.message || err);
+  }
+  render();
+}
+
+async function goToCampaigns() {
+  screen = "campaigns";
+  campaignsError = "";
+  campaignsLoading = true;
+  render();
+  try {
+    const user = getStoredUser();
+    campaignList = await loadCampaignsForUser(user.login);
+  } catch (err) {
+    campaignsError = "Não foi possível carregar campanhas: " + (err.message || err);
+  }
+  campaignsLoading = false;
+  render();
+}
+
+async function handleCreateCampaign() {
+  const input = document.getElementById("new-campaign-name");
+  const name = input ? input.value.trim() : "";
+  if (!name) return;
+  const user = getStoredUser();
+  try {
+    const slug = await createCampaign(name, user.login);
+    newCampaignName = "";
+    await openCampaignDashboardScreen(slug);
+  } catch (err) {
+    campaignsError = "Falha ao criar campanha: " + (err.message || err);
+    render();
+  }
+}
+
+async function openCampaignDashboardScreen(slug) {
+  currentCampaignSlug = slug;
+  screen = "campaign-dashboard";
+  campaignDashError = "";
+  currentCampaign = null;
+  render();
+  try {
+    currentCampaign = await loadCampaignDashboard(slug);
+  } catch (err) {
+    campaignDashError = "Falha ao carregar campanha: " + (err.message || err);
+  }
+  render();
+}
+
+async function handleLinkCharacter() {
+  const ownerInput = document.getElementById("link-owner-input");
+  const idInput = document.getElementById("link-charid-input");
+  const owner = ownerInput ? ownerInput.value.trim() : "";
+  const characterId = idInput ? idInput.value.trim() : "";
+  if (!owner || !characterId) return;
+  try {
+    await linkCharacterToCampaign(currentCampaignSlug, owner, characterId);
+    linkOwnerInput = "";
+    linkCharIdInput = "";
+    currentCampaign = await loadCampaignDashboard(currentCampaignSlug);
+    campaignDashError = "";
+  } catch (err) {
+    campaignDashError = err.message || String(err);
+  }
+  render();
+}
+
+async function handleUnlinkCharacter(owner, characterId) {
+  try {
+    await unlinkCharacterFromCampaign(currentCampaignSlug, owner, characterId);
+    currentCampaign = await loadCampaignDashboard(currentCampaignSlug);
+  } catch (err) {
+    campaignDashError = "Falha ao remover vínculo: " + (err.message || err);
+  }
+  render();
+}
+
+async function createNewCharacter() {
+  const user = getStoredUser();
+  const id = uid();
+  const path = `users/${user.login}/characters/${id}.json`;
+  const newChar = emptyCharacter();
+  try {
+    await writeJsonFile(path, newChar, null, `feat: cria personagem "${newChar.basic.name}"`);
+    character = newChar;
+    currentPath = path;
+    currentSha = null;
+    const fresh = await readJsonFile(path);
+    if (fresh) currentSha = fresh.sha;
+    activeTab = "basic";
+    screen = "sheet";
+    saveStatus = "";
+    render();
+  } catch (err) {
+    listError = "Falha ao criar personagem: " + (err.message || err);
+    render();
+  }
+}
+
+async function openCharacter(path) {
+  try {
+    const result = await readJsonFile(path);
+    if (!result) throw new Error("Arquivo não encontrado");
+    character = result.data;
+    currentSha = result.sha;
+    currentPath = path;
+    activeTab = "basic";
+    screen = "sheet";
+    saveStatus = "";
+    render();
+  } catch (err) {
+    listError = "Falha ao abrir personagem: " + (err.message || err);
+    render();
+  }
+}
+
+// ---------- Eventos ----------
+function attachEvents() {
+  const loginBtn = document.getElementById("login-btn");
+  if (loginBtn) {
+    loginBtn.addEventListener("click", async () => {
+      const input = document.getElementById("token-input");
+      const token = input.value.trim();
+      if (!token) return;
+      loginLoading = true;
+      loginError = "";
+      render();
+      const result = await validateAndStoreToken(token);
+      loginLoading = false;
+      if (result.ok) {
+        goToList();
+      } else {
+        loginError = result.error;
+        render();
+      }
+    });
+  }
+
+  document.querySelectorAll("[data-action='logout']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      clearAuth();
+      screen = "login";
+      loginError = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='new-character']").forEach((btn) => {
+    btn.addEventListener("click", createNewCharacter);
+  });
+
+  document.querySelectorAll("[data-action='open-character']").forEach((btn) => {
+    btn.addEventListener("click", () => openCharacter(btn.dataset.path));
+  });
+
+  document.querySelectorAll("[data-action='nav-characters']").forEach((btn) => {
+    btn.addEventListener("click", goToList);
+  });
+  document.querySelectorAll("[data-action='nav-campaigns']").forEach((btn) => {
+    btn.addEventListener("click", goToCampaigns);
+  });
+
+  document.querySelectorAll("[data-action='create-campaign']").forEach((btn) => {
+    btn.addEventListener("click", handleCreateCampaign);
+  });
+  const newCampaignInput = document.getElementById("new-campaign-name");
+  if (newCampaignInput) {
+    newCampaignInput.addEventListener("input", (e) => { newCampaignName = e.target.value; });
+    newCampaignInput.addEventListener("keydown", (e) => { if (e.key === "Enter") handleCreateCampaign(); });
+  }
+
+  document.querySelectorAll("[data-action='open-campaign']").forEach((btn) => {
+    btn.addEventListener("click", () => openCampaignDashboardScreen(btn.dataset.slug));
+  });
+
+  document.querySelectorAll("[data-action='back-to-campaigns']").forEach((btn) => {
+    btn.addEventListener("click", goToCampaigns);
+  });
+
+  document.querySelectorAll("[data-action='do-link-character']").forEach((btn) => {
+    btn.addEventListener("click", handleLinkCharacter);
+  });
+  const linkOwnerEl = document.getElementById("link-owner-input");
+  if (linkOwnerEl) linkOwnerEl.addEventListener("input", (e) => { linkOwnerInput = e.target.value; });
+  const linkCharIdEl = document.getElementById("link-charid-input");
+  if (linkCharIdEl) linkCharIdEl.addEventListener("input", (e) => { linkCharIdInput = e.target.value; });
+
+  document.querySelectorAll("[data-action='unlink-character']").forEach((btn) => {
+    btn.addEventListener("click", () => handleUnlinkCharacter(btn.dataset.owner, btn.dataset.id));
+  });
+
+  document.querySelectorAll("[data-action='back-to-list']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      clearTimeout(saveTimer);
+      goToList();
+    });
+  });
+
+  document.querySelectorAll("[data-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      activeTab = btn.dataset.tab;
+      classConfirm = false;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-bind]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const path = input.dataset.bind.split(".");
+      let obj = character;
+      for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
+      const key = path[path.length - 1];
+      obj[key] = input.dataset.numeric ? Number(input.value || 0) : input.value;
+      if (activeTab === "resources") updateResourceBarsInPlace();
+      if (activeTab === "basic" && input.dataset.bind === "basic.name") {
+        document.querySelector(".char-name").textContent = character.basic.name;
+      }
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-list]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const list = character[input.dataset.list];
+      const item = list.find((x) => x.id === input.dataset.id);
+      if (!item) return;
+      item[input.dataset.field] = input.dataset.numeric ? Number(input.value || 0) : input.value;
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='remove']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      character[btn.dataset.list] = character[btn.dataset.list].filter((x) => x.id !== btn.dataset.id);
+      render();
+      scheduleSave();
+    });
+  });
+
+  bindAction("add-skill", () => character.skills.push({ id: uid(), name: "Nova Perícia", bonus: 0, dice: "1d20" }));
+  bindAction("add-ability", () => character.abilities.push({ id: uid(), name: "Nova Habilidade", description: "" }));
+  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", attackRoll: "", critRange: "" }));
+  bindAction("add-attack", () => character.attacks.push({ id: uid(), name: "Novo Ataque", dice: "1d6", critRange: "20" }));
+
+  bindAction("level-up", () => {
+    character.resources.level += 1;
+    character.resources.hpMax += 10;
+    character.resources.hpCurrent += 10;
+    character.resources.mpMax += 20;
+    character.resources.mpCurrent += 20;
+  });
+
+  bindAction("class-start", () => { character.classInfo = { skipped: false, name: "", fields: [] }; });
+  bindAction("class-add-field", () => { character.classInfo.fields.push(["", ""]); });
+  bindAction("class-skip", () => { character.classInfo = { skipped: true, name: "", fields: [] }; classConfirm = false; });
+  bindAction("class-confirm", () => { classConfirm = true; });
+
+  document.querySelectorAll("[data-class-field]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const i = Number(input.dataset.classField);
+      const part = Number(input.dataset.classFieldPart);
+      character.classInfo.fields[i][part] = input.value;
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='roll-skill']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const s = character.skills.find((x) => x.id === btn.dataset.id);
+      doRoll(s.dice, s.bonus, `Perícia: ${s.name}`);
+    });
+  });
+  document.querySelectorAll("[data-action='roll-item']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const it = character.items.find((x) => x.id === btn.dataset.id);
+      doRoll(it.attackRoll, 0, `Item: ${it.name}`);
+    });
+  });
+  document.querySelectorAll("[data-action='roll-attack']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const a = character.attacks.find((x) => x.id === btn.dataset.id);
+      doRoll(a.dice, 0, `Ataque: ${a.name}`);
+    });
+  });
+}
+
+function bindAction(name, handler) {
+  document.querySelectorAll(`[data-action='${name}']`).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      handler();
+      render();
+      scheduleSave();
+    });
+  });
+}
+
+function updateResourceBarsInPlace() {
+  const r = character.resources;
+  const blocks = document.querySelectorAll(".bar-block");
+  const configs = [
+    { current: r.hpCurrent, max: r.hpMax },
+    { current: r.mpCurrent, max: r.mpMax },
+  ];
+  blocks.forEach((block, i) => {
+    const cfg = configs[i];
+    const pct = cfg.max > 0 ? Math.max(0, Math.min(100, (cfg.current / cfg.max) * 100)) : 0;
+    block.querySelector(".bar-fill").style.width = pct + "%";
+    block.querySelector(".bar-top span:last-child").textContent = `${cfg.current} / ${cfg.max}`;
+  });
+}
+
+// ---------- Inicialização ----------
+async function init() {
+  const token = getStoredToken();
+  if (!token) {
+    screen = "login";
+    render();
+    return;
+  }
+  const result = await validateAndStoreToken(token);
+  if (result.ok) {
+    goToList();
+  } else {
+    clearAuth();
+    screen = "login";
+    loginError = "Sua sessão expirou. Faça login novamente.";
+    render();
+  }
+}
+
+init();
