@@ -615,7 +615,7 @@ function renderList() {
         <button class="btn btn-teal" data-action="new-character" style="width:100%;margin-top:14px;">
           + Criar novo personagem
         </button>
-        <button class="btn-link" data-action="logout" style="margin-top:14px;display:block;">Sair</button>
+        <button class="btn btn-teal" data-action="logout" style="margin-top:14px;display:block;">Sair</button>
       </div>
     </div>`;
 }
@@ -646,7 +646,7 @@ function renderCampaigns() {
           <input type="text" id="new-campaign-name" placeholder="Nome da nova campanha" value="${esc(newCampaignName)}" />
           <button class="btn btn-stamp" data-action="create-campaign">Criar</button>
         </div>
-        <button class="btn-link" data-action="logout" style="margin-top:14px;display:block;">Sair</button>
+        <button class="btn btn-teal" data-action="logout" style="margin-top:14px;display:block;">Sair</button>
       </div>
     </div>`;
 }
