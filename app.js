@@ -468,6 +468,7 @@ function renderResources() {
         <div class="level-number">${r.level}</div>
       </div>
       <button class="btn btn-stamp" data-action="level-up">Subir Nível</button>
+      <button class="btn btn-stamp" data-action="level-down">Descer Nível</button>
     </div>
     ${bar("HP", "hpCurrent", "hpMax", "var(--stamp)")}
     ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}`;
@@ -878,6 +879,14 @@ function attachEvents() {
     character.resources.hpCurrent += 10;
     character.resources.mpMax += 20;
     character.resources.mpCurrent += 20;
+  });
+
+    bindAction("level-down", () => {
+    character.resources.level -= 1;
+    character.resources.hpMax -= 10;
+    character.resources.hpCurrent -= 10;
+    character.resources.mpMax -= 20;
+    character.resources.mpCurrent -= 20;
   });
 
   bindAction("class-start", () => { character.classInfo = { skipped: false, name: "", fields: [] }; });
