@@ -554,16 +554,36 @@ function doRoll(dice, bonus, label, critRange, critMultiplier) {
     critNote = " — FALHA CRÍTICA!";
   }
 
-  toast = {
+  const finalToast = {
     label: label + critNote,
     roll: `${result.notation} → [${result.rolls.join(", ")}] ${result.mod >= 0 ? "+" : ""}${result.mod}`,
     total: finalTotal,
     crit: isCrit,
     fumble: isFumble,
   };
-  pushRollHistory(toast);
-  render();
-  setTimeout(() => { toast = null; render(); }, 4500);
+  animateRoll(label, base.sides, base.count, finalToast);
+}
+
+// Anima a rolagem (números "girando" por um instante, só na tela de quem rolou)
+// antes de revelar o resultado final — inclusive o flash de crítico/falha crítica.
+function animateRoll(baseLabel, sides, diceCount, finalToast) {
+  let spins = 0;
+  const maxSpins = 7;
+  const step = () => {
+    spins++;
+    if (spins > maxSpins) {
+      toast = finalToast;
+      pushRollHistory(finalToast);
+      render();
+      setTimeout(() => { toast = null; render(); }, 4500);
+      return;
+    }
+    const fake = Array.from({ length: diceCount || 1 }, () => 1 + Math.floor(Math.random() * (sides || 20)));
+    toast = { rolling: true, label: baseLabel, roll: `[${fake.join(", ")}]`, total: null };
+    render();
+    setTimeout(step, 70);
+  };
+  step();
 }
 
 // Guarda as últimas rolagens na própria ficha (persistida no GitHub junto com o resto),
@@ -624,16 +644,14 @@ function doAttackTest(attack) {
     dmgTotal = 0;
   }
 
-  toast = {
+  const finalToast = {
     label: `Ataque: ${attack.name}${critNote}`,
     roll: `Teste (${skill.name}): 1d20 → [${testRoll.rolls.join(", ")}] ${testBonus >= 0 ? "+" : ""}${testBonus} = ${testTotal}  |  Dano: ${dmgRoll.notation} → [${dmgRoll.rolls.join(", ")}]`,
     total: dmgTotal,
     crit: isCrit,
     fumble: isFumble,
   };
-  pushRollHistory(toast);
-  render();
-  setTimeout(() => { toast = null; render(); }, 4500);
+  animateRoll(`Ataque: ${attack.name}`, 20, 1, finalToast);
 }
 
 function esc(str) {
@@ -696,7 +714,7 @@ function renderLoading() {
 
 function renderLogin() {
   return `
-    <div class="center-box">
+    <div class="center-box login-screen">
       <div class="login-card">
         <div class="eyebrow">Arquivo da Ordem</div>
         <h1 class="char-name" style="margin-bottom:1rem;">Acesso Restrito</h1>
@@ -1441,6 +1459,13 @@ function renderHistoryPanel() {
 
 function renderToast() {
   if (!toast) return "";
+  if (toast.rolling) {
+    return `
+      <div class="toast rolling">
+        <div class="toast-label"><span class="dice-spin">🎲</span> ${esc(toast.label)}</div>
+        <div class="toast-roll">${esc(toast.roll)}</div>
+      </div>`;
+  }
   const flashClass = toast.crit ? "crit-flash" : toast.fumble ? "fumble-flash" : "";
   const toastClass = toast.crit ? "toast-crit" : toast.fumble ? "toast-fumble" : "";
   return `
