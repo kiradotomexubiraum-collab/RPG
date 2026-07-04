@@ -119,19 +119,19 @@ body {
 
 .tabs-inline {
   background: transparent;
-  padding: 0 0 10px;
+  padding: 0 0 6px;
   position: static;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .tab-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 5px;
+  padding: 5px 11px;
   font-family: 'Orbitron', 'Rajdhani', monospace;
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.5px;
   color: var(--text-dim);
   background: transparent;
@@ -165,20 +165,16 @@ body {
   position: sticky;
   top: 45px;
   align-self: flex-start;
-  max-height: calc(100vh - 45px);
-  overflow-y: auto;
 }
 
 .sheet-col-mid {
-  width: 380px;
+  width: 360px;
   flex-shrink: 0;
-  padding: 1.25rem 1.1rem;
+  padding: 1.25rem 1rem;
   border-right: 1px solid var(--border);
   position: sticky;
   top: 45px;
   align-self: flex-start;
-  max-height: calc(100vh - 45px);
-  overflow-y: auto;
 }
 
 .sheet-col-right {
@@ -512,7 +508,7 @@ textarea { resize: vertical; }
 .promote-btn:hover { box-shadow: 0 0 14px var(--gold-glow); }
 
 .skill-row {
-  padding: 5px 0;
+  padding: 3px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -524,19 +520,25 @@ textarea { resize: vertical; }
   border-bottom: 1px solid var(--border);
 }
 
-.skill-name { margin-bottom: 3px; }
+.skill-name { margin-bottom: 2px; }
 .skill-row input[readonly] { opacity: 0.75; border-style: dashed; }
 
 .skill-row-controls {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
 .skill-row-controls .training-select { width: 118px; flex-shrink: 0; }
 .skill-row-controls .buff { width: 52px; text-align: center; flex-shrink: 0; }
 .attack-row input.dice { width: 70px; text-align: center; }
+
+.skill-input {
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.promote-btn { height: 26px; }
 
 .card-box {
   background: var(--paper-dark);
@@ -613,20 +615,29 @@ textarea { resize: vertical; }
 }
 
 /* ---------- Toast de rolagem ---------- */
-.toast {
+.dice-overlay {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
   background: var(--paper-dark);
   color: var(--ink-text);
   border: 1px solid var(--teal);
-  border-radius: 8px;
-  padding: 12px 18px;
+  border-radius: 10px;
+  padding: 18px 26px;
   min-width: 260px;
+  max-width: 90vw;
   font-family: 'Rajdhani', monospace;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 24px var(--teal-glow);
-  z-index: 60;
   animation: toast-in 0.2s ease-out;
+  text-align: center;
 }
 
 .toast.rolling {
@@ -635,19 +646,73 @@ textarea { resize: vertical; }
   animation: toast-in 0.15s ease-out, rolling-pulse 0.5s ease-in-out infinite;
 }
 
-.dice-spin {
-  display: inline-block;
-  animation: dice-spin 0.5s linear infinite;
+.dice-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.die-shape {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+}
+
+.die-shape svg { width: 100%; height: 100%; overflow: visible; }
+
+.die-shape polygon {
+  fill: var(--paper);
+  stroke: var(--violet);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 10px var(--violet-glow));
+}
+
+.die-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Orbitron', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink-text);
+}
+
+.die-shape.die-spinning {
+  animation: die-spin-3d 0.5s linear infinite;
+}
+.die-shape.die-spinning polygon {
+  stroke: var(--violet);
+}
+
+.die-shape.die-max polygon {
+  stroke: var(--crit);
+  fill: rgba(46, 204, 113, 0.12);
+  filter: drop-shadow(0 0 16px var(--crit-glow));
+}
+.die-shape.die-max .die-value { color: var(--crit); }
+
+.die-shape.die-min polygon {
+  stroke: var(--stamp);
+  fill: rgba(220, 60, 60, 0.12);
+  filter: drop-shadow(0 0 16px var(--stamp-glow));
+}
+.die-shape.die-min .die-value { color: var(--stamp); }
+
+@keyframes die-spin-3d {
+  0% { transform: rotate(0deg) scaleX(1); }
+  50% { transform: rotate(180deg) scaleX(0.75); }
+  100% { transform: rotate(360deg) scaleX(1); }
 }
 
 @keyframes rolling-pulse {
   0%, 100% { opacity: 0.85; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.015); }
-}
-
-@keyframes dice-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .toast.toast-crit {
@@ -663,8 +728,8 @@ textarea { resize: vertical; }
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes crit-pulse {
