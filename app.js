@@ -46,7 +46,7 @@ let newMonsterFormError = "";
 let editingMonsterId = null; // id do monstro do bestiário em edição (só o dono pode editar)
 let editMonsterFormError = "";
 
-let activeTab = "basic";
+let activeTab = "class";
 let toast = null;
 let classConfirm = false;
 let showHistory = false;
@@ -476,9 +476,7 @@ async function unlinkCharacterFromCampaign(slug, ownerUsername, characterId) {
 }
 
 const TABS = [
-  { id: "basic", label: "Básico", icon: "user" },
   { id: "class", label: "Classe", icon: "layers" },
-  { id: "resources", label: "Recursos", icon: "heart" },
   { id: "skills", label: "Perícias", icon: "sparkles" },
   { id: "abilities", label: "Habilidades", icon: "wand" },
   { id: "items", label: "Itens", icon: "backpack" },
@@ -496,6 +494,7 @@ const ICONS = {
   dice: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1" fill="currentColor"/><circle cx="16" cy="8" r="1" fill="currentColor"/><circle cx="8" cy="16" r="1" fill="currentColor"/><circle cx="16" cy="16" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>',
   trash: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
   plus: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
+  image: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
 };
 
 // ---------- Rolagem de dados ----------
@@ -654,10 +653,38 @@ function doAttackTest(attack) {
   animateRoll(`Ataque: ${attack.name}`, 20, 1, finalToast);
 }
 
+// Campo reutilizável de "anexar imagem" por upload de arquivo (em vez de colar
+// uma URL) — usado nos formulários de monstro. idPrefix vira o id do input
+// escondido que guarda o data URL; os handlers ficam em attachEvents().
+function renderImageUploadField(idPrefix, currentUrl) {
+  return `
+    <div class="image-upload-row">
+      <label class="image-upload-preview" for="${idPrefix}-file">
+        ${currentUrl ? `<img src="${esc(currentUrl)}" alt="">` : ICONS.image}
+      </label>
+      <input type="file" accept="image/*" id="${idPrefix}-file" data-image-target="${idPrefix}" hidden />
+      <input type="hidden" id="${idPrefix}" value="${esc(currentUrl || "")}" />
+      <label for="${idPrefix}-file" class="btn-link image-upload-label">${currentUrl ? "trocar imagem" : "escolher imagem"}</label>
+    </div>`;
+}
+
 function esc(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
+}
+
+// Lê um arquivo de imagem escolhido pelo usuário e devolve como data URL —
+// método mais acessível que pedir pra colar uma URL (não exige hospedar a
+// imagem em outro site antes). Fica salvo como texto dentro do próprio JSON.
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve("");
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Não foi possível ler a imagem."));
+    reader.readAsDataURL(file);
+  });
 }
 
 // ---------- Salvamento automático ----------
@@ -980,8 +1007,10 @@ function renderCampaignDashboard() {
           <input type="number" id="monster-level-input" placeholder="Nível" style="width:80px;" />
           <input type="number" id="monster-hp-input" placeholder="HP" style="width:80px;" />
           <input type="number" id="monster-mp-input" placeholder="MP" style="width:80px;" />
-          <button class="btn btn-teal" data-action="do-add-monster">+ criar monstro</button>
         </div>
+        ${renderImageUploadField("monster-image-input", "")}
+        <textarea rows="2" id="monster-desc-input" placeholder="Descrição (aparência, comportamento, fraquezas...) — opcional"></textarea>
+        <button class="btn btn-teal" data-action="do-add-monster" style="margin-top:6px;">+ criar monstro</button>
         <button class="btn-add" data-action="toggle-bulk-monster-add" style="margin-top:8px;">${ICONS.plus} adicionar em massa</button>
         ${
           showBulkMonsterAdd
@@ -1063,7 +1092,7 @@ function renderBestiary() {
               <input type="number" id="edit-monster-hp-${m.id}" placeholder="HP" value="${esc(String(m.hp ?? 0))}" />
               <input type="number" id="edit-monster-mp-${m.id}" placeholder="MP" value="${esc(String(m.mp ?? 0))}" />
             </div>
-            <input type="text" id="edit-monster-image-${m.id}" placeholder="URL da imagem (opcional)" value="${esc(m.imageUrl || "")}" />
+            ${renderImageUploadField(`edit-monster-image-${m.id}`, m.imageUrl || "")}
             <textarea rows="3" id="edit-monster-desc-${m.id}" placeholder="Descrição...">${esc(m.description || "")}</textarea>
             ${editMonsterFormError ? `<p class="login-error">${esc(editMonsterFormError)}</p>` : ""}
             <div style="display:flex;gap:8px;margin-top:6px;">
@@ -1128,7 +1157,7 @@ function renderBestiary() {
             <input type="number" id="new-monster-hp" placeholder="HP" />
             <input type="number" id="new-monster-mp" placeholder="MP" />
           </div>
-          <input type="text" id="new-monster-image" placeholder="URL da imagem (opcional)" />
+          ${renderImageUploadField("new-monster-image", "")}
           <textarea rows="3" id="new-monster-desc" placeholder="Descrição (aparência, comportamento, fraquezas...)"></textarea>
           ${newMonsterFormError ? `<p class="login-error">${esc(newMonsterFormError)}</p>` : ""}
           <div style="display:flex;gap:8px;margin-top:6px;">
@@ -1153,18 +1182,21 @@ function renderBasic() {
   const b = character.basic;
   return `
     <div class="avatar-row">
-      <div class="avatar">${b.photoUrl ? `<img src="${esc(b.photoUrl)}" alt="">` : ICONS.user}</div>
+      <label class="avatar avatar-upload" title="Clique para escolher uma foto do seu dispositivo">
+        ${b.photoUrl ? `<img src="${esc(b.photoUrl)}" alt="">` : ICONS.user}
+        <input type="file" accept="image/*" data-photo-bind="basic.photoUrl" hidden />
+      </label>
       <div style="flex:1">
         <label class="field">
           <span class="field-label">Nome do personagem</span>
           <input type="text" data-bind="basic.name" value="${esc(b.name)}" />
         </label>
+        <p class="helper-text" style="margin-top:2px;">
+          Clique na foto para enviar uma imagem do computador ou celular.
+          ${b.photoUrl ? ` <button class="btn-link danger" type="button" data-action="clear-avatar-photo">remover foto</button>` : ""}
+        </p>
       </div>
     </div>
-    <label class="field">
-      <span class="field-label">URL da foto</span>
-      <input type="text" data-bind="basic.photoUrl" value="${esc(b.photoUrl)}" placeholder="https://..." />
-    </label>
     <div class="grid-2">
       <label class="field">
         <span class="field-label">Idade</span>
@@ -1224,7 +1256,7 @@ function renderResources() {
     const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
     const tc = textClass || "";
     return `
-      <div class="bar-block">
+      <div class="bar-block bar-block-${currentKey}">
         <div class="bar-top">
           <span class="field-label ${tc}" style="margin:0;">${label}</span>
           <span class="${tc}" style="font-family:'Special Elite',monospace;font-size:13px;">${current} / ${max}</span>
@@ -1376,9 +1408,7 @@ function renderAttacks() {
 
 function renderTabContent() {
   switch (activeTab) {
-    case "basic": return renderBasic();
     case "class": return renderClass();
-    case "resources": return renderResources();
     case "skills": return renderSkills();
     case "abilities": return renderAbilities();
     case "items": return renderItems();
@@ -1414,9 +1444,18 @@ function renderSheet() {
           <button class="btn-back" data-action="back-to-list">← meus personagens</button>
         </div>
       </div>
-      <div class="tabs">${tabsHtml}</div>
       ${sheetReadOnly ? `<div class="readonly-banner">👁 Somente leitura — você não tem permissão para editar a ficha deste personagem.</div>` : ""}
-      <div class="tab-content ${sheetReadOnly ? "readonly-lock" : ""}">${renderTabContent()}</div>
+      <div class="sheet-body ${sheetReadOnly ? "readonly-lock" : ""}">
+        <aside class="sheet-sidebar">
+          <div class="sidebar-section">${renderBasic()}</div>
+          <div class="sidebar-divider"></div>
+          <div class="sidebar-section">${renderResources()}</div>
+        </aside>
+        <div class="sheet-main">
+          <div class="tabs">${tabsHtml}</div>
+          <div class="tab-content">${renderTabContent()}</div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1654,7 +1693,7 @@ async function createNewCharacter() {
     currentSha = null;
     const fresh = await readJsonFile(path);
     if (fresh) currentSha = fresh.sha;
-    activeTab = "basic";
+    activeTab = "class";
     screen = "sheet";
     saveStatus = "";
     render();
@@ -1671,7 +1710,7 @@ async function openCharacterCore(path) {
     character = normalizeCharacter(result.data);
     currentSha = result.sha;
     currentPath = path;
-    activeTab = "basic";
+    activeTab = "class";
     screen = "sheet";
     saveStatus = "";
     render();
@@ -1814,11 +1853,58 @@ function attachEvents() {
       for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
       const key = path[path.length - 1];
       obj[key] = input.dataset.numeric ? Number(input.value || 0) : input.value;
-      if (activeTab === "resources") updateResourceBarsInPlace();
-      if (activeTab === "basic" && input.dataset.bind === "basic.name") {
+      if (input.dataset.bind.startsWith("resources.")) updateResourceBarsInPlace();
+      if (input.dataset.bind === "basic.name") {
         document.querySelector(".char-name").textContent = character.basic.name;
       }
       scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-photo-bind]").forEach((fileInput) => {
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      let dataUrl;
+      try {
+        dataUrl = await readImageFileAsDataUrl(file);
+      } catch (err) {
+        return;
+      }
+      const path = fileInput.dataset.photoBind.split(".");
+      let obj = character;
+      for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
+      obj[path[path.length - 1]] = dataUrl;
+      scheduleSave();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='clear-avatar-photo']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      character.basic.photoUrl = "";
+      scheduleSave();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-image-target]").forEach((fileInput) => {
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      let dataUrl;
+      try {
+        dataUrl = await readImageFileAsDataUrl(file);
+      } catch (err) {
+        return;
+      }
+      const targetId = fileInput.dataset.imageTarget;
+      const hiddenInput = document.getElementById(targetId);
+      if (hiddenInput) hiddenInput.value = dataUrl;
+      const preview = document.querySelector(`label.image-upload-preview[for="${fileInput.id}"]`);
+      if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="">`;
+      const label = fileInput.parentElement ? fileInput.parentElement.querySelector(".image-upload-label") : null;
+      if (label) label.textContent = "trocar imagem";
     });
   });
 
@@ -2129,6 +2215,8 @@ function attachEvents() {
       const levelEl = document.getElementById("monster-level-input");
       const hpEl = document.getElementById("monster-hp-input");
       const mpEl = document.getElementById("monster-mp-input");
+      const imageEl = document.getElementById("monster-image-input");
+      const descEl = document.getElementById("monster-desc-input");
       const name = nameEl ? nameEl.value.trim() : "";
       if (!name) {
         monsterFormError = "Dê um nome ao monstro.";
@@ -2140,6 +2228,8 @@ function attachEvents() {
         level: levelEl && levelEl.value ? Number(levelEl.value) : 1,
         hp: hpEl && hpEl.value ? Number(hpEl.value) : 0,
         mp: mpEl && mpEl.value ? Number(mpEl.value) : 0,
+        imageUrl: imageEl ? imageEl.value.trim() : "",
+        description: descEl ? descEl.value.trim() : "",
       };
       try {
         await addMonster(currentCampaignSlug, monster);
@@ -2196,13 +2286,12 @@ function bindAction(name, handler) {
 
 function updateResourceBarsInPlace() {
   const r = character.resources;
-  const blocks = document.querySelectorAll(".bar-block");
-  const configs = [
-    { current: r.hpCurrent, max: r.hpMax },
-    { current: r.mpCurrent, max: r.mpMax },
-  ];
-  blocks.forEach((block, i) => {
-    const cfg = configs[i];
+  [
+    { selector: ".bar-block-hpCurrent", current: r.hpCurrent, max: r.hpMax },
+    { selector: ".bar-block-mpCurrent", current: r.mpCurrent, max: r.mpMax },
+  ].forEach((cfg) => {
+    const block = document.querySelector(cfg.selector);
+    if (!block) return;
     const pct = cfg.max > 0 ? Math.max(0, Math.min(100, (cfg.current / cfg.max) * 100)) : 0;
     block.querySelector(".bar-fill").style.width = pct + "%";
     block.querySelector(".bar-top span:last-child").textContent = `${cfg.current} / ${cfg.max}`;
