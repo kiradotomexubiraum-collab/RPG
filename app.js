@@ -25,46 +25,88 @@ let linkCharIdInput = "";
 let activeTab = "basic";
 let toast = null;
 let classConfirm = false;
+let showHistory = false;
 
 function uid() {
   return Math.random().toString(36).slice(2, 8);
 }
 
+// Lista oficial de perícias de Ordem Paranormal + "Magia" (perícia extra desta ficha,
+// usada pra testes de ataque mágico). Luta, Pontaria e Magia são as únicas usadas nos
+// testes de ataque e por isso não podem ser removidas da ficha.
+const OFFICIAL_SKILLS = [
+  "Acrobacia", "Adestramento", "Artes", "Atletismo", "Atualidades", "Ciências", "Crime",
+  "Diplomacia", "Enganação", "Fortitude", "Furtividade", "Iniciativa", "Intimidação",
+  "Intuição", "Investigação", "Luta", "Medicina", "Ocultismo", "Percepção", "Pilotagem",
+  "Pontaria", "Profissão", "Reflexos", "Religião", "Sobrevivência", "Tática", "Tecnologia",
+  "Vontade", "Magia",
+];
+const MANDATORY_SKILLS = ["Luta", "Pontaria", "Magia"];
+
+// Treinamento: Destreinado (+0), Treinado (+5), Veterano (+10), Expert (+15).
+const TRAINING_LEVELS = [
+  { value: 0, label: "Destreinado" },
+  { value: 5, label: "Treinado" },
+  { value: 10, label: "Veterano" },
+  { value: 15, label: "Expert" },
+];
+
+function skillBonus(skill) {
+  return Number(skill.training || 0) + Number(skill.buff || 0);
+}
+
 function emptyCharacter() {
-  const lutaId = uid();
-  const pontariaId = uid();
-  const magiaId = uid();
+  const skills = OFFICIAL_SKILLS.map((name) => ({
+    id: uid(),
+    name,
+    training: 0,
+    buff: 0,
+    mandatory: MANDATORY_SKILLS.includes(name),
+  }));
+  const lutaId = skills.find((s) => s.name === "Luta").id;
   return {
     basic: { name: "Investigador Sem Nome", photoUrl: "", age: "", weight: "", height: "", financialStatus: "Estável" },
     classInfo: { skipped: true, name: "", fields: [] },
     resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20, xp: 0, gold: 0 },
-    skills: [
-      { id: lutaId, name: "Luta", bonus: 0, dice: "1d20", mandatory: true },
-      { id: pontariaId, name: "Pontaria", bonus: 0, dice: "1d20", mandatory: true },
-      { id: magiaId, name: "Magia", bonus: 0, dice: "1d20", mandatory: true },
-      { id: uid(), name: "Investigação", bonus: 2, dice: "1d20" },
-    ],
+    skills,
     abilities: [],
     items: [],
     attacks: [{ id: uid(), name: "Faca de Combate", dice: "1d6+1", critRange: "20", critMultiplier: "2", skillId: lutaId }],
+    rollHistory: [],
   };
 }
 
-// Garante que as perícias obrigatórias (Luta, Pontaria, Magia) existam e estejam
-// marcadas como "mandatory", mesmo em fichas criadas antes desse recurso existir —
-// sem isso o seletor de perícia do ataque ficaria vazio pra quem já tinha ficha salva.
+// Garante que todas as perícias oficiais existam (com treinamento/buff), que Luta,
+// Pontaria e Magia estejam marcadas como obrigatórias, e migra fichas antigas que
+// ainda usavam o modelo { bonus, dice } por perícia — tudo isso pra fichas criadas
+// antes desses recursos existirem não quebrarem quando abertas.
 function normalizeCharacter(character) {
-  const MANDATORY_SKILLS = ["Luta", "Pontaria", "Magia"];
   if (!character.skills) character.skills = [];
-  MANDATORY_SKILLS.forEach((name) => {
-    const existing = character.skills.find((s) => s.name === name);
-    if (existing) existing.mandatory = true;
-    else character.skills.push({ id: uid(), name, bonus: 0, dice: "1d20", mandatory: true });
+
+  character.skills.forEach((s) => {
+    if (s.training === undefined) {
+      // Perícia do modelo antigo: usa o bônus livre existente como "buff" pra não perder o valor.
+      s.training = 0;
+      s.buff = s.bonus || 0;
+    }
+    if (s.buff === undefined) s.buff = 0;
+    delete s.dice;
+    delete s.bonus;
   });
+
+  OFFICIAL_SKILLS.forEach((name) => {
+    const existing = character.skills.find((s) => s.name === name);
+    if (existing) existing.mandatory = MANDATORY_SKILLS.includes(name) ? true : existing.mandatory;
+    else character.skills.push({ id: uid(), name, training: 0, buff: 0, mandatory: MANDATORY_SKILLS.includes(name) });
+  });
+
   if (!character.attacks) character.attacks = [];
   character.attacks.forEach((a) => {
     if (a.skillId === undefined) a.skillId = null;
   });
+
+  if (!character.rollHistory) character.rollHistory = [];
+
   return character;
 }
 
@@ -250,9 +292,27 @@ function doRoll(dice, bonus, label, critRange, critMultiplier) {
     label: label + critNote,
     roll: `${result.notation} → [${result.rolls.join(", ")}] ${result.mod >= 0 ? "+" : ""}${result.mod}`,
     total: finalTotal,
+    crit: isCrit,
   };
+  pushRollHistory(toast);
   render();
   setTimeout(() => { toast = null; render(); }, 4500);
+}
+
+// Guarda as últimas rolagens na própria ficha (persistida no GitHub junto com o resto),
+// assim tanto o jogador quanto o mestre (quando abre a ficha vinculada na campanha)
+// enxergam o mesmo histórico.
+function pushRollHistory(entry) {
+  if (!character.rollHistory) character.rollHistory = [];
+  character.rollHistory.unshift({
+    time: new Date().toISOString(),
+    label: entry.label,
+    roll: entry.roll,
+    total: entry.total,
+    crit: !!entry.crit,
+  });
+  if (character.rollHistory.length > 30) character.rollHistory.length = 30;
+  scheduleSave();
 }
 
 // Teste de ataque: rola a perícia escolhida (com o bônus dela), checa crítico
@@ -266,14 +326,9 @@ function doAttackTest(attack) {
     return;
   }
 
-  const testRoll = rollDice(skill.dice);
-  if (!testRoll) {
-    toast = { label: "Erro", roll: `Notação inválida na perícia "${skill.name}": "${skill.dice}"`, total: null };
-    render();
-    setTimeout(() => { toast = null; render(); }, 3000);
-    return;
-  }
-  const testTotal = testRoll.total + (skill.bonus || 0);
+  const testRoll = rollDice("1d20");
+  const testBonus = skillBonus(skill);
+  const testTotal = testRoll.total + testBonus;
 
   const dmgRoll = rollDice(attack.dice);
   if (!dmgRoll) {
@@ -299,9 +354,11 @@ function doAttackTest(attack) {
 
   toast = {
     label: `Ataque: ${attack.name}${critNote}`,
-    roll: `Teste (${skill.name}): ${testRoll.notation} → [${testRoll.rolls.join(", ")}] ${testRoll.mod >= 0 ? "+" : ""}${testRoll.mod} = ${testTotal}  |  Dano: ${dmgRoll.notation} → [${dmgRoll.rolls.join(", ")}]`,
+    roll: `Teste (${skill.name}): 1d20 → [${testRoll.rolls.join(", ")}] ${testBonus >= 0 ? "+" : ""}${testBonus} = ${testTotal}  |  Dano: ${dmgRoll.notation} → [${dmgRoll.rolls.join(", ")}]`,
     total: dmgTotal,
+    crit: isCrit,
   };
+  pushRollHistory(toast);
   render();
   setTimeout(() => { toast = null; render(); }, 4500);
 }
@@ -646,18 +703,26 @@ function renderResources() {
 
 function renderSkills() {
   const rows = character.skills
-    .map(
-      (s) => `
+    .map((s) => {
+      const trainingOptions = TRAINING_LEVELS
+        .map((t) => `<option value="${t.value}" ${Number(s.training || 0) === t.value ? "selected" : ""}>${t.label}</option>`)
+        .join("");
+      return `
       <div class="skill-row" data-id="${s.id}">
-        <input type="text" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" />
-        <input type="number" class="bonus" data-list="skills" data-id="${s.id}" data-field="bonus" data-numeric="true" value="${s.bonus}" />
-        <input type="text" class="dice" data-list="skills" data-id="${s.id}" data-field="dice" value="${esc(s.dice)}" />
-        <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar">${ICONS.dice}</button>
-        <button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>
-      </div>`
-    )
+        <input type="text" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
+        <select class="training-select" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
+        <input type="number" class="buff" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
+        <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
+        ${s.mandatory ? "" : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
+      </div>`;
+    })
     .join("");
-  return `${rows}<button class="btn-add" data-action="add-skill">${ICONS.plus} adicionar perícia</button>`;
+  return `
+    <p class="helper-text" style="margin-bottom:10px;">
+      Toda perícia rola sempre 1d20 + treinamento + buff. Luta, Pontaria e Magia não podem ser removidas
+      (são usadas nos testes de ataque, na aba Ataques).
+    </p>
+    ${rows}<button class="btn-add" data-action="add-skill">${ICONS.plus} adicionar perícia</button>`;
 }
 
 function renderAbilities() {
@@ -764,6 +829,7 @@ function renderSheet() {
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <span class="stamp">confidencial</span>
+          <button class="btn-link" data-action="toggle-history">histórico de rolagens</button>
           <button class="btn-link" data-action="back-to-list">← meus personagens</button>
         </div>
       </div>
@@ -772,10 +838,42 @@ function renderSheet() {
     </div>`;
 }
 
+// Painel de histórico de rolagens: fica salvo na própria ficha, então tanto o jogador
+// quanto o mestre (ao abrir a ficha vinculada pela campanha) veem as mesmas entradas.
+function renderHistoryPanel() {
+  if (!showHistory) return "";
+  const entries = (character.rollHistory || [])
+    .map((h) => {
+      const time = new Date(h.time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      return `
+      <div class="history-entry ${h.crit ? "is-crit" : ""}">
+        <div class="history-entry-top">
+          <span class="history-label">${esc(h.label)}</span>
+          <span class="history-time">${esc(time)}</span>
+        </div>
+        <div class="history-roll">${esc(h.roll)}</div>
+        ${h.total !== null && h.total !== undefined ? `<div class="history-total">${esc(String(h.total))}</div>` : ""}
+      </div>`;
+    })
+    .join("");
+
+  return `
+    <div class="history-overlay" data-action="close-history-bg">
+      <div class="history-panel">
+        <div class="history-panel-header">
+          <span>Histórico de Rolagens</span>
+          <button class="btn-link" data-action="toggle-history">fechar ✕</button>
+        </div>
+        <div class="history-list">${entries || `<p class="helper-text">Nenhuma rolagem ainda.</p>`}</div>
+      </div>
+    </div>`;
+}
+
 function renderToast() {
   if (!toast) return "";
   return `
-    <div class="toast">
+    ${toast.crit ? `<div class="crit-flash"></div>` : ""}
+    <div class="toast ${toast.crit ? "toast-crit" : ""}">
       <div class="toast-label">${esc(toast.label)}</div>
       <div class="toast-roll">${esc(toast.roll)}</div>
       ${toast.total !== null ? `<div class="toast-total">${toast.total}</div>` : ""}
@@ -793,7 +891,7 @@ function render() {
   else if (screen === "campaign-dashboard") html = renderCampaignDashboard();
   else if (screen === "sheet") html = renderSheet();
 
-  app.innerHTML = html + renderToast();
+  app.innerHTML = html + renderToast() + (screen === "sheet" ? renderHistoryPanel() : "");
   attachEvents();
   if (screen === "sheet") updateSaveIndicator();
 }
@@ -1059,7 +1157,7 @@ function attachEvents() {
     });
   });
 
-  bindAction("add-skill", () => character.skills.push({ id: uid(), name: "Nova Perícia", bonus: 0, dice: "1d20" }));
+  bindAction("add-skill", () => character.skills.push({ id: uid(), name: "Nova Perícia", training: 0, buff: 0 }));
   bindAction("add-ability", () => character.abilities.push({ id: uid(), name: "Nova Habilidade", description: "" }));
   bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", attackRoll: "", critRange: "", critMultiplier: "2" }));
   bindAction("add-attack", () => character.attacks.push({ id: uid(), name: "Novo Ataque", dice: "1d6", critRange: "20", critMultiplier: "2" }));
@@ -1122,10 +1220,26 @@ function attachEvents() {
     });
   });
 
+  document.querySelectorAll("[data-action='toggle-history']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      showHistory = !showHistory;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='close-history-bg']").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target === el) {
+        showHistory = false;
+        render();
+      }
+    });
+  });
+
   document.querySelectorAll("[data-action='roll-skill']").forEach((btn) => {
     btn.addEventListener("click", () => {
       const s = character.skills.find((x) => x.id === btn.dataset.id);
-      doRoll(s.dice, s.bonus, `Perícia: ${s.name}`);
+      doRoll("1d20", skillBonus(s), `Perícia: ${s.name}`);
     });
   });
   document.querySelectorAll("[data-action='roll-item']").forEach((btn) => {
