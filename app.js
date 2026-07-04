@@ -34,12 +34,43 @@ function emptyCharacter() {
   return {
     basic: { name: "Investigador Sem Nome", photoUrl: "", age: "", weight: "", height: "", financialStatus: "Estável" },
     classInfo: { skipped: true, name: "", fields: [] },
-    resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20 },
+    resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20, xp: 0, gold: 0 },
     skills: [{ id: uid(), name: "Investigação", bonus: 2, dice: "1d20" }],
     abilities: [],
     items: [],
-    attacks: [{ id: uid(), name: "Faca de Combate", dice: "1d6+1", critRange: "20" }],
+    attacks: [{ id: uid(), name: "Faca de Combate", dice: "1d6+1", critRange: "20", critMultiplier: "2" }],
   };
+}
+
+// XP necessário pra subir de CADA nível (índice 0 = do nível 1 pro 2, etc).
+// Depois do último valor da lista, cada nível seguinte soma mais 5000.
+const XP_TABLE = [100, 500, 2500, 5000, 10000];
+
+function xpNeededForLevel(level) {
+  const index = level - 1;
+  if (index < XP_TABLE.length) return XP_TABLE[index];
+  return XP_TABLE[XP_TABLE.length - 1] + (index - XP_TABLE.length + 1) * 5000;
+}
+
+// Aplica XP ganho, subindo quantos níveis forem necessários e mantendo o restante.
+function applyXpGain(character, amount) {
+  let xp = character.resources.xp + amount;
+  let level = character.resources.level;
+  let levelsGained = 0;
+  while (xp >= xpNeededForLevel(level)) {
+    xp -= xpNeededForLevel(level);
+    level += 1;
+    levelsGained += 1;
+  }
+  character.resources.level = level;
+  character.resources.xp = xp;
+  for (let i = 0; i < levelsGained; i++) {
+    character.resources.hpMax += 10;
+    character.resources.hpCurrent += 10;
+    character.resources.mpMax += 20;
+    character.resources.mpCurrent += 20;
+  }
+  return levelsGained;
 }
 
 function slugify(name) {
@@ -155,7 +186,17 @@ function rollDice(notation) {
   return { notation, rolls, mod, total };
 }
 
-function doRoll(dice, bonus, label) {
+function parseCritThreshold(critRange) {
+  if (!critRange) return null;
+  const parts = critRange
+    .split("-")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !isNaN(n));
+  if (parts.length === 0) return null;
+  return Math.min(...parts);
+}
+
+function doRoll(dice, bonus, label, critRange, critMultiplier) {
   const base = rollDice(dice);
   if (!base) {
     toast = { label: "Erro", roll: `Notação inválida: "${dice}"`, total: null };
@@ -164,10 +205,25 @@ function doRoll(dice, bonus, label) {
     return;
   }
   const result = bonus ? { ...base, mod: base.mod + bonus, total: base.total + bonus } : base;
+
+  const threshold = parseCritThreshold(critRange);
+  const multiplier = parseFloat(critMultiplier) || 1;
+  const isCrit = threshold !== null && result.rolls.some((r) => r >= threshold);
+
+  let finalTotal = result.total;
+  let critNote = "";
+  if (isCrit && multiplier > 1) {
+    const diceSum = result.rolls.reduce((a, b) => a + b, 0);
+    finalTotal = diceSum * multiplier + result.mod;
+    critNote = ` — CRÍTICO ×${multiplier}!`;
+  } else if (isCrit) {
+    critNote = " — CRÍTICO!";
+  }
+
   toast = {
-    label,
+    label: label + critNote,
     roll: `${result.notation} → [${result.rolls.join(", ")}] ${result.mod >= 0 ? "+" : ""}${result.mod}`,
-    total: result.total,
+    total: finalTotal,
   };
   render();
   setTimeout(() => { toast = null; render(); }, 4500);
@@ -267,10 +323,13 @@ function renderList() {
   const items = characterList
     .map(
       (c) => `
-      <button class="char-list-item" data-action="open-character" data-path="${esc(c.path)}">
-        <span>${esc(c.name)}</span>
-        <span class="char-list-arrow">→</span>
-      </button>`
+      <div class="char-list-item">
+        <button class="char-list-open" data-action="open-character" data-path="${esc(c.path)}">
+          <span>${esc(c.name)}</span>
+          <span class="char-list-arrow">→</span>
+        </button>
+        <button class="btn-copy-id" data-action="copy-id" data-id="${esc(c.id)}">ID: ${esc(c.id)} (copiar)</button>
+      </div>`
     )
     .join("");
 
@@ -280,6 +339,9 @@ function renderList() {
         <div class="eyebrow">Conectado como ${esc(user?.login || "")}</div>
         ${renderNavTabs("characters")}
         <h1 class="char-name" style="margin-bottom:1rem;">Meus Personagens</h1>
+        <p class="helper-text" style="margin-bottom:10px;">
+          Pra vincular um personagem a uma campanha, o mestre vai pedir seu username do GitHub e o ID mostrado abaixo de cada ficha.
+        </p>
         ${listError ? `<p class="login-error">${esc(listError)}</p>` : ""}
         ${items || `<p class="helper-text">Nenhum personagem ainda.</p>`}
         <button class="btn btn-teal" data-action="new-character" style="width:100%;margin-top:14px;">
@@ -295,10 +357,12 @@ function renderCampaigns() {
   const items = campaignList
     .map(
       (c) => `
-      <button class="char-list-item" data-action="open-campaign" data-slug="${esc(c.slug)}">
-        <span>${esc(c.name)} <span class="role-tag">${c.role === "gm" ? "mestre" : "jogador"}</span></span>
-        <span class="char-list-arrow">→</span>
-      </button>`
+      <div class="char-list-item">
+        <button class="char-list-open" data-action="open-campaign" data-slug="${esc(c.slug)}">
+          <span>${esc(c.name)} <span class="role-tag">${c.role === "gm" ? "mestre" : "jogador"}</span></span>
+          <span class="char-list-arrow">→</span>
+        </button>
+      </div>`
     )
     .join("");
 
@@ -331,7 +395,10 @@ function renderCampaignDashboard() {
       (entry) => `
       <li class="linked-item">
         <span><strong>${esc(entry.characterOwner)}</strong> — ${esc(entry.characterId)}</span>
-        ${isGm ? `<button class="btn-link danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
+        <span style="display:flex;gap:10px;align-items:center;">
+          <button class="btn-link" data-action="open-linked-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">abrir ficha</button>
+          ${isGm ? `<button class="btn-link danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
+        </span>
       </li>`
     )
     .join("");
@@ -371,7 +438,7 @@ function renderCampaignDashboard() {
     </div>`;
 }
 
-// ---------- Conteúdo das abas ----------
+// ---------- Conteúdo das abas (idêntico ao protótipo anterior) ----------
 function renderBasic() {
   const b = character.basic;
   return `
@@ -432,7 +499,7 @@ function renderClass() {
     </label>
     <span class="field-label" style="display:block;margin-bottom:8px;">Campos livres</span>
     ${fieldsHtml}
-    <button class="btn-link" data-action="class-add-field">+ campo</button>
+    <button class="btn-add" data-action="class-add-field">${ICONS.plus} campo</button>
     <div style="margin-top:14px;display:flex;gap:16px;align-items:center;">
       <button class="btn btn-stamp" data-action="class-confirm">Concluir criação da classe</button>
       <button class="btn-link danger" data-action="class-skip">pular esta etapa</button>
@@ -461,15 +528,41 @@ function renderResources() {
         </div>
       </div>`;
   }
+
+  const xpNeeded = xpNeededForLevel(r.level);
+  const xpPct = Math.max(0, Math.min(100, (r.xp / xpNeeded) * 100));
+
   return `
     <div class="level-row">
       <div>
         <span class="field-label" style="display:block;">Nível</span>
         <div class="level-number">${r.level}</div>
       </div>
-      <button class="btn btn-stamp" data-action="level-up">Subir Nível</button>
-      <button class="btn btn-stamp" data-action="level-down">Descer Nível</button>
+      <button class="btn btn-stamp" data-action="level-down" ${r.level <= 1 ? "disabled" : ""}>Reduzir Nível</button>
     </div>
+
+    <div class="bar-block">
+      <div class="bar-top">
+        <span class="field-label" style="margin:0;">XP</span>
+        <span style="font-family:'Special Elite',monospace;font-size:13px;">${r.xp} / ${xpNeeded}</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" style="width:${xpPct}%;background:#3b6fd6;"></div></div>
+      <div class="bar-inputs">
+        <input type="number" id="xp-gain-input" placeholder="quantidade" style="width:110px;" />
+        <button class="btn btn-teal" data-action="add-xp" style="padding:6px 12px;font-size:12px;">+ adicionar XP</button>
+      </div>
+      <p class="helper-text" style="font-size:12px;margin-top:6px;">
+        Some XP livremente; o personagem sobe quantos níveis forem necessários e mantém o restante automaticamente.
+      </p>
+    </div>
+
+    <div class="bar-block">
+      <div class="bar-top">
+        <span class="field-label" style="margin:0;">Gold</span>
+      </div>
+      <input type="number" data-bind="resources.gold" data-numeric="true" value="${r.gold || 0}" />
+    </div>
+
     ${bar("HP", "hpCurrent", "hpMax", "var(--stamp)")}
     ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}`;
 }
@@ -487,7 +580,7 @@ function renderSkills() {
       </div>`
     )
     .join("");
-  return `${rows}<button class="btn-link" data-action="add-skill" style="margin-top:10px;">+ adicionar perícia</button>`;
+  return `${rows}<button class="btn-add" data-action="add-skill">${ICONS.plus} adicionar perícia</button>`;
 }
 
 function renderAbilities() {
@@ -500,10 +593,14 @@ function renderAbilities() {
           <button class="trash-btn" data-action="remove" data-list="abilities" data-id="${a.id}">${ICONS.trash}</button>
         </div>
         <textarea rows="2" data-list="abilities" data-id="${a.id}" data-field="description" placeholder="Descrição da habilidade...">${esc(a.description)}</textarea>
+        <div class="item-attack-row">
+          <input type="text" data-list="abilities" data-id="${a.id}" data-field="dice" placeholder="Dado de dano/efeito (ex: 2d6, opcional)" value="${esc(a.dice || "")}" />
+          ${a.dice ? `<button class="dice-btn" data-action="roll-ability" data-id="${a.id}" title="Rolar">${ICONS.dice}</button>` : ""}
+        </div>
       </div>`
     )
     .join("");
-  return `${cards}<button class="btn-link" data-action="add-ability">+ adicionar habilidade</button>`;
+  return `${cards}<button class="btn-add" data-action="add-ability">${ICONS.plus} adicionar habilidade</button>`;
 }
 
 function renderItems() {
@@ -518,13 +615,14 @@ function renderItems() {
         <textarea rows="2" data-list="items" data-id="${it.id}" data-field="description" placeholder="Descrição do item...">${esc(it.description)}</textarea>
         <div class="item-attack-row">
           <input type="text" data-list="items" data-id="${it.id}" data-field="attackRoll" placeholder="Rolagem de ataque (ex: 1d8+2)" value="${esc(it.attackRoll)}" />
-          <input type="text" class="crit" data-list="items" data-id="${it.id}" data-field="critRange" placeholder="Crítico" value="${esc(it.critRange)}" />
+          <input type="text" class="crit" data-list="items" data-id="${it.id}" data-field="critRange" placeholder="Crítico (ex: 20 ou 19-20)" value="${esc(it.critRange)}" />
+          <input type="text" data-list="items" data-id="${it.id}" data-field="critMultiplier" placeholder="×2" value="${esc(it.critMultiplier || "")}" style="width:52px;text-align:center;" title="Multiplicador de dano no crítico" />
           ${it.attackRoll ? `<button class="dice-btn" data-action="roll-item" data-id="${it.id}" title="Rolar">${ICONS.dice}</button>` : ""}
         </div>
       </div>`
     )
     .join("");
-  return `${cards}<button class="btn-link" data-action="add-item">+ adicionar item</button>`;
+  return `${cards}<button class="btn-add" data-action="add-item">${ICONS.plus} adicionar item</button>`;
 }
 
 function renderAttacks() {
@@ -533,14 +631,15 @@ function renderAttacks() {
       (a) => `
       <div class="attack-row" data-id="${a.id}">
         <input type="text" data-list="attacks" data-id="${a.id}" data-field="name" value="${esc(a.name)}" style="flex:1;font-weight:600;" />
-        <input type="text" class="dice" data-list="attacks" data-id="${a.id}" data-field="dice" value="${esc(a.dice)}" />
-        <input type="text" data-list="attacks" data-id="${a.id}" data-field="critRange" value="${esc(a.critRange)}" style="width:60px;text-align:center;" />
+        <input type="text" class="dice" data-list="attacks" data-id="${a.id}" data-field="dice" value="${esc(a.dice)}" title="Dado de dano" />
+        <input type="text" data-list="attacks" data-id="${a.id}" data-field="critRange" value="${esc(a.critRange)}" style="width:56px;text-align:center;" title="Faixa de crítico (ex: 20 ou 19-20)" />
+        <input type="text" data-list="attacks" data-id="${a.id}" data-field="critMultiplier" value="${esc(a.critMultiplier || "")}" style="width:44px;text-align:center;" placeholder="×2" title="Multiplicador de dano no crítico" />
         <button class="dice-btn" data-action="roll-attack" data-id="${a.id}" title="Rolar">${ICONS.dice}</button>
         <button class="trash-btn" data-action="remove" data-list="attacks" data-id="${a.id}">${ICONS.trash}</button>
       </div>`
     )
     .join("");
-  return `${rows}<button class="btn-link" data-action="add-attack" style="margin-top:10px;">+ adicionar ataque</button>`;
+  return `${rows}<button class="btn-add" data-action="add-attack">${ICONS.plus} adicionar ataque</button>`;
 }
 
 function renderTabContent() {
@@ -564,6 +663,9 @@ function renderSheet() {
     </button>`
   ).join("");
 
+  const idMatch = currentPath ? currentPath.match(/characters\/(.+)\.json$/) : null;
+  const shortId = idMatch ? idMatch[1] : "";
+
   return `
     <div class="sheet">
       <div class="sheet-header">
@@ -571,6 +673,7 @@ function renderSheet() {
           <div class="eyebrow">Arquivo da Ordem — Ficha de Campo</div>
           <h1 class="char-name">${esc(character.basic.name)}</h1>
           <div id="save-indicator" class="save-indicator"></div>
+          ${shortId ? `<button class="btn-copy-id" data-action="copy-id" data-id="${esc(shortId)}" style="margin-top:4px;">ID: ${esc(shortId)} (copiar)</button>` : ""}
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <span class="stamp">confidencial</span>
@@ -870,23 +973,51 @@ function attachEvents() {
 
   bindAction("add-skill", () => character.skills.push({ id: uid(), name: "Nova Perícia", bonus: 0, dice: "1d20" }));
   bindAction("add-ability", () => character.abilities.push({ id: uid(), name: "Nova Habilidade", description: "" }));
-  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", attackRoll: "", critRange: "" }));
-  bindAction("add-attack", () => character.attacks.push({ id: uid(), name: "Novo Ataque", dice: "1d6", critRange: "20" }));
+  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", attackRoll: "", critRange: "", critMultiplier: "2" }));
+  bindAction("add-attack", () => character.attacks.push({ id: uid(), name: "Novo Ataque", dice: "1d6", critRange: "20", critMultiplier: "2" }));
 
-  bindAction("level-up", () => {
-    character.resources.level += 1;
-    character.resources.hpMax += 10;
-    character.resources.hpCurrent += 10;
-    character.resources.mpMax += 20;
-    character.resources.mpCurrent += 20;
+  bindAction("level-down", () => {
+    if (character.resources.level <= 1) return;
+    character.resources.level -= 1;
+    character.resources.hpMax = Math.max(10, character.resources.hpMax - 10);
+    character.resources.hpCurrent = Math.min(character.resources.hpCurrent, character.resources.hpMax);
+    character.resources.mpMax = Math.max(0, character.resources.mpMax - 20);
+    character.resources.mpCurrent = Math.min(character.resources.mpCurrent, character.resources.mpMax);
   });
 
-    bindAction("level-down", () => {
-    character.resources.level -= 1;
-    character.resources.hpMax -= 10;
-    character.resources.hpCurrent -= 10;
-    character.resources.mpMax -= 20;
-    character.resources.mpCurrent -= 20;
+  document.querySelectorAll("[data-action='add-xp']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = document.getElementById("xp-gain-input");
+      const amount = input ? parseInt(input.value, 10) : 0;
+      if (!amount || amount <= 0) return;
+      applyXpGain(character, amount);
+      render();
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='copy-id']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      try {
+        await navigator.clipboard.writeText(id);
+        btn.textContent = "Copiado ✓";
+        setTimeout(() => { btn.textContent = `ID: ${id} (copiar)`; }, 1500);
+      } catch {
+        alert(`ID do personagem: ${id}`);
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-action='open-linked-character']").forEach((btn) => {
+    btn.addEventListener("click", () => openCharacter(`users/${btn.dataset.owner}/characters/${btn.dataset.id}.json`));
+  });
+
+  document.querySelectorAll("[data-action='roll-ability']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const ab = character.abilities.find((x) => x.id === btn.dataset.id);
+      doRoll(ab.dice, 0, `Habilidade: ${ab.name}`);
+    });
   });
 
   bindAction("class-start", () => { character.classInfo = { skipped: false, name: "", fields: [] }; });
@@ -912,13 +1043,13 @@ function attachEvents() {
   document.querySelectorAll("[data-action='roll-item']").forEach((btn) => {
     btn.addEventListener("click", () => {
       const it = character.items.find((x) => x.id === btn.dataset.id);
-      doRoll(it.attackRoll, 0, `Item: ${it.name}`);
+      doRoll(it.attackRoll, 0, `Item: ${it.name}`, it.critRange, it.critMultiplier);
     });
   });
   document.querySelectorAll("[data-action='roll-attack']").forEach((btn) => {
     btn.addEventListener("click", () => {
       const a = character.attacks.find((x) => x.id === btn.dataset.id);
-      doRoll(a.dice, 0, `Ataque: ${a.name}`);
+      doRoll(a.dice, 0, `Ataque: ${a.name}`, a.critRange, a.critMultiplier);
     });
   });
 }
