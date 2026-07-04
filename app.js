@@ -736,7 +736,7 @@ function renderCampaignDashboard() {
         <h1 class="char-name" style="margin-bottom:1rem;">${esc(cd.campaign.name)}</h1>
         ${campaignDashError ? `<p class="login-error">${esc(campaignDashError)}</p>` : ""}
 
-        <button class="btn-link" data-action="toggle-campaign-history" style="margin-bottom:10px;display:block;">histórico de rolagens da campanha</button>
+        <button class="btn btn-teal" data-action="toggle-campaign-history" style="margin-bottom:10px;display:block;">histórico de rolagens da campanha</button>
 
         <h2 class="section-title">Personagens Vinculados</h2>
         <ul class="linked-list">${linkedItems || `<li class="helper-text">Nenhum personagem vinculado ainda.</li>`}</ul>
@@ -811,7 +811,7 @@ function renderCampaignHistoryPanel() {
       <div class="history-panel">
         <div class="history-panel-header">
           <span>Histórico de Rolagens da Campanha</span>
-          <button class="btn-link" data-action="toggle-campaign-history">fechar ✕</button>
+          <button class="btn btn-teal" data-action="toggle-campaign-history">fechar ✕</button>
         </div>
         <div class="history-list">${body}</div>
       </div>
@@ -1079,7 +1079,7 @@ function renderSheet() {
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <span class="stamp">confidencial</span>
-          <button class="btn-link" data-action="toggle-history">histórico de rolagens</button>
+          <button class="btn btn-teal" data-action="toggle-history">histórico de rolagens</button>
           ${sheetCampaignSlug ? `<button class="btn-back" data-action="back-to-campaign">← voltar para campanha</button>` : ""}
           <button class="btn-back" data-action="back-to-list">← meus personagens</button>
         </div>
@@ -1120,7 +1120,7 @@ function renderHistoryPanel() {
       <div class="history-panel">
         <div class="history-panel-header">
           <span>Histórico de Rolagens</span>
-          <button class="btn-link" data-action="toggle-history">fechar ✕</button>
+          <button class="btn btn-teal" data-action="toggle-history">fechar ✕</button>
         </div>
         <div class="history-list">${entries || `<p class="helper-text">Nenhuma rolagem ainda.</p>`}</div>
       </div>
