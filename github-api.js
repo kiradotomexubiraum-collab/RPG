@@ -56,4 +56,4 @@ async function writeJsonFile(path, data, knownSha, commitMessage) {
 
   const json = await res.json();
   return json.content.sha;
-    }
+}
