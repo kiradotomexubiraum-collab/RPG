@@ -140,7 +140,7 @@ body {
 }
 
 .sheet-sidebar {
-  width: 350px;
+  width: 450px;
   flex-shrink: 0;
   padding: 1.5rem 1.25rem;
   border-right: 1px solid var(--border);
