@@ -237,6 +237,11 @@ textarea { resize: vertical; }
 .skill-row input.bonus, .attack-row input.dice { width: 60px; text-align: center; }
 .skill-row input.dice { width: 70px; text-align: center; }
 
+.attack-skill-select {
+  width: 110px;
+  flex-shrink: 0;
+}
+
 .card-box {
   background: var(--paper-dark);
   border-radius: 6px;
