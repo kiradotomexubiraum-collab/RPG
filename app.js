@@ -371,7 +371,7 @@ function renderCampaignDashboard() {
     </div>`;
 }
 
-// ---------- Conteúdo das abas (idêntico ao protótipo anterior) ----------
+// ---------- Conteúdo das abas ----------
 function renderBasic() {
   const b = character.basic;
   return `
