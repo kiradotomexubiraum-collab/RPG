@@ -921,3 +921,228 @@ button:disabled {
   margin-top: 6px;
 }
 .monster-form input { flex: 1; min-width: 70px; }
+
+/* ---------- Sub-abas (Minhas Campanhas / Todas as Campanhas) ---------- */
+.sub-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sub-tab {
+  border: none;
+  background: transparent;
+  font-family: 'Orbitron', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  padding: 8px 4px;
+  cursor: pointer;
+  color: var(--text-dim);
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.sub-tab:hover { color: var(--ink-text); }
+.sub-tab.active { color: var(--teal); border-bottom-color: var(--teal); }
+
+.campaign-preview-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 400;
+  margin-top: 3px;
+  white-space: normal;
+}
+
+/* ---------- Descrição da campanha ---------- */
+.campaign-desc-textarea { margin-top: 4px; }
+
+.campaign-desc-view {
+  background: var(--paper-dark);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--ink-text);
+  white-space: pre-wrap;
+  margin: 4px 0 0;
+}
+
+/* ---------- Monstros da campanha: versão com imagem/descrição ---------- */
+.monster-item-rich {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.monster-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  flex-shrink: 0;
+  background: var(--bg-alt);
+}
+.monster-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+.monster-item-body { flex: 1; min-width: 140px; }
+
+.monster-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.monster-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* ---------- Adição de monstros em massa ---------- */
+.bulk-monster-box {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--paper-dark);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.bulk-monster-box code {
+  background: rgba(139, 180, 220, 0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'Share Tech Mono', monospace;
+}
+.bulk-monster-box textarea { font-family: 'Share Tech Mono', monospace; font-size: 13px; }
+
+/* ---------- Bestiário global ---------- */
+.grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.new-monster-form {
+  margin-top: 10px;
+}
+
+.monster-card-form {
+  background: var(--paper-dark);
+  border: 1px solid var(--violet);
+  border-radius: 8px;
+  padding: 14px;
+  box-shadow: 0 0 16px var(--violet-glow) inset;
+}
+.monster-card-form input,
+.monster-card-form textarea {
+  margin-bottom: 8px;
+}
+
+.bestiary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.monster-card {
+  background: var(--paper-dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.monster-card:hover { border-color: var(--border-strong); }
+
+.monster-card-editing {
+  grid-column: 1 / -1;
+  padding: 14px;
+}
+
+.monster-card-image {
+  width: 100%;
+  height: 130px;
+  background: var(--bg-alt);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+}
+.monster-card-image img { width: 100%; height: 100%; object-fit: cover; }
+.monster-card-placeholder { color: var(--violet); opacity: 0.5; }
+.monster-card-placeholder svg { width: 34px; height: 34px; }
+
+.monster-card-body {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.monster-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.monster-card-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink-text);
+}
+
+.monster-card-stats {
+  font-family: 'Orbitron', monospace;
+  font-size: 10px;
+  color: var(--gold);
+  flex-shrink: 0;
+}
+
+.monster-card-bars-mini {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--teal);
+  margin-top: 4px;
+}
+
+.monster-card-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 8px 0 0;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.monster-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.monster-card-owner {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: 'Orbitron', monospace;
+  letter-spacing: 0.3px;
+}
+
+.monster-card-owner-actions { display: flex; gap: 10px; }
+
+@media (max-width: 640px) {
+  .grid-3 { grid-template-columns: 1fr; }
+  .bestiary-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 420px) {
+  .bestiary-grid { grid-template-columns: 1fr; }
+}
