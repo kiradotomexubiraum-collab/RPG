@@ -1244,18 +1244,18 @@ function renderBasic() {
   const idMatch = currentPath ? currentPath.match(/characters\/(.+)\.json$/) : null;
   const shortId = idMatch ? idMatch[1] : "";
   return `
-    <div class="avatar-row">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex-shrink:0;">
-        <label class="avatar avatar-upload" title="Clique para escolher uma foto do seu dispositivo">
-          ${b.photoUrl ? `<img src="${esc(b.photoUrl)}" alt="">` : ICONS.user}
-          <input type="file" accept="image/*" data-photo-bind="basic.photoUrl" hidden />
-        </label>
-        ${b.photoUrl ? `<button class="btn-link danger" type="button" data-action="clear-avatar-photo">remover foto</button>` : ""}
-      </div>
-      <label class="field" style="flex:1;">
-        <span class="field-label">Nome do personagem</span>
-        <input type="text" data-bind="basic.name" value="${esc(b.name)}" />
+    <div class="avatar-row" style="align-items:flex-start;">
+      <label class="avatar avatar-upload" style="width:110px;height:110px;font-size:38px;" title="Clique para escolher uma foto do seu dispositivo">
+        ${b.photoUrl ? `<img src="${esc(b.photoUrl)}" alt="">` : ICONS.user}
+        <input type="file" accept="image/*" data-photo-bind="basic.photoUrl" hidden />
       </label>
+      <div style="flex:1;">
+        ${b.photoUrl ? `<button class="btn-link danger" type="button" data-action="clear-avatar-photo" style="display:block;margin-bottom:6px;">remover foto</button>` : ""}
+        <label class="field">
+          <span class="field-label">Nome do personagem</span>
+          <input type="text" data-bind="basic.name" value="${esc(b.name)}" />
+        </label>
+      </div>
     </div>
     <div class="grid-2">
       <label class="field">
