@@ -27,8 +27,36 @@ let toast = null;
 let classConfirm = false;
 let showHistory = false;
 
+// Controle de permissão de edição na ficha: true quando a pessoa está
+// vendo o personagem de outro jogador (via campanha) e não é o mestre.
+let sheetReadOnly = false;
+// Slug da campanha de origem, quando a ficha foi aberta a partir de um
+// painel de campanha (permite o botão "voltar para campanha").
+let sheetCampaignSlug = null;
+
+let showCampaignHistory = false;
+let campaignHistoryLoading = false;
+let campaignHistoryEntries = [];
+
+let monsterFormError = "";
+
 function uid() {
   return Math.random().toString(36).slice(2, 8);
+}
+
+// Paleta usada para diferenciar visualmente cada personagem (histórico da
+// campanha, cartões de personagens vinculados etc.). A cor é derivada de
+// forma determinística do dono+id, então o mesmo personagem sempre usa a
+// mesma cor, mesmo em sessões diferentes.
+const CHAR_COLOR_PALETTE = [
+  "#8b5cf6", "#00c2b8", "#f0b429", "#ff6b9d", "#4dd0e1",
+  "#ff9f43", "#5c7cfa", "#e64980", "#20c997", "#fab005",
+];
+function colorForCharacter(owner, characterId) {
+  const str = `${owner}/${characterId}`;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) >>> 0;
+  return CHAR_COLOR_PALETTE[hash % CHAR_COLOR_PALETTE.length];
 }
 
 // Lista oficial de perícias de Ordem Paranormal + "Magia" (perícia extra desta ficha,
@@ -66,7 +94,7 @@ function emptyCharacter() {
   const lutaId = skills.find((s) => s.name === "Luta").id;
   return {
     basic: { name: "Investigador Sem Nome", photoUrl: "", age: "", weight: "", height: "", financialStatus: "Estável" },
-    classInfo: { skipped: true, name: "", fields: [] },
+    classInfo: { skipped: false, name: "", fields: [], notes: "" },
     resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20, xp: 0, gold: 0 },
     skills,
     abilities: [],
@@ -107,6 +135,9 @@ function normalizeCharacter(character) {
 
   if (!character.rollHistory) character.rollHistory = [];
 
+  if (!character.classInfo) character.classInfo = { skipped: false, name: "", fields: [], notes: "" };
+  if (character.classInfo.notes === undefined) character.classInfo.notes = "";
+
   return character;
 }
 
@@ -120,15 +151,24 @@ function xpNeededForLevel(level) {
   return XP_TABLE[XP_TABLE.length - 1] + (index - XP_TABLE.length + 1) * 5000;
 }
 
+const MAX_LEVEL = 100;
+const MAX_XP_PER_ADD = 2000;
+
 // Aplica XP ganho, subindo quantos níveis forem necessários e mantendo o restante.
+// Respeita o nível máximo (100): ao atingi-lo, o personagem para de subir e o
+// excedente de XP simplesmente não é mais consumido.
 function applyXpGain(character, amount) {
-  let xp = character.resources.xp + amount;
+  const clampedAmount = Math.max(0, Math.min(amount, MAX_XP_PER_ADD));
+  let xp = character.resources.xp + clampedAmount;
   let level = character.resources.level;
   let levelsGained = 0;
-  while (xp >= xpNeededForLevel(level)) {
+  while (level < MAX_LEVEL && xp >= xpNeededForLevel(level)) {
     xp -= xpNeededForLevel(level);
     level += 1;
     levelsGained += 1;
+  }
+  if (level >= MAX_LEVEL) {
+    level = MAX_LEVEL;
   }
   character.resources.level = level;
   character.resources.xp = xp;
@@ -179,25 +219,102 @@ async function createCampaign(name, gmUsername) {
   const campaign = { name, gmUsername, createdAt: new Date().toISOString() };
   const members = [{ username: gmUsername, role: "gm" }];
   const linked = [];
+  const monsters = [];
 
   await writeJsonFile(`campaigns/${slug}/campaign.json`, campaign, null, `feat: cria campanha "${name}"`);
   await writeJsonFile(`campaigns/${slug}/members.json`, members, null, `feat: membros iniciais de "${name}"`);
   await writeJsonFile(`campaigns/${slug}/linked_characters.json`, linked, null, `feat: vínculos iniciais de "${name}"`);
+  await writeJsonFile(`campaigns/${slug}/monsters.json`, monsters, null, `feat: monstros iniciais de "${name}"`);
 
   return slug;
+}
+
+// Busca dados resumidos (nome, foto, classe, HP/MP, XP) de cada personagem
+// vinculado, pra exibir no painel da campanha sem precisar abrir a ficha.
+async function hydrateLinkedCharacters(linked) {
+  return Promise.all(
+    linked.map(async (entry) => {
+      const color = colorForCharacter(entry.characterOwner, entry.characterId);
+      try {
+        const res = await readJsonFile(`users/${entry.characterOwner}/characters/${entry.characterId}.json`);
+        if (!res) return { ...entry, color, missing: true };
+        const c = res.data;
+        return {
+          ...entry,
+          color,
+          name: c.basic?.name || entry.characterId,
+          photoUrl: c.basic?.photoUrl || "",
+          className: c.classInfo && !c.classInfo.skipped ? (c.classInfo.name || "") : "",
+          level: c.resources?.level ?? 1,
+          hpCurrent: c.resources?.hpCurrent ?? 0,
+          hpMax: c.resources?.hpMax ?? 0,
+          mpCurrent: c.resources?.mpCurrent ?? 0,
+          mpMax: c.resources?.mpMax ?? 0,
+          xp: c.resources?.xp ?? 0,
+          xpNeeded: xpNeededForLevel(c.resources?.level ?? 1),
+        };
+      } catch {
+        return { ...entry, color, missing: true };
+      }
+    })
+  );
 }
 
 async function loadCampaignDashboard(slug) {
   const campaignRes = await readJsonFile(`campaigns/${slug}/campaign.json`);
   const membersRes = await readJsonFile(`campaigns/${slug}/members.json`);
   const linkedRes = await readJsonFile(`campaigns/${slug}/linked_characters.json`);
+  const monstersRes = await readJsonFile(`campaigns/${slug}/monsters.json`);
+  const linkedHydrated = await hydrateLinkedCharacters(linkedRes.data);
   return {
     campaign: campaignRes.data,
     members: membersRes.data,
     membersSha: membersRes.sha,
     linked: linkedRes.data,
     linkedSha: linkedRes.sha,
+    linkedHydrated,
+    monsters: monstersRes ? monstersRes.data : [],
+    monstersSha: monstersRes ? monstersRes.sha : null,
   };
+}
+
+// Junta o histórico de rolagens de todos os personagens vinculados à
+// campanha, marcado com a cor/foto de cada um, pra um painel único visível
+// a todos os membros (mestre e jogadores).
+async function loadCampaignRollHistory(slug, linked) {
+  const perCharacter = await Promise.all(
+    linked.map(async (entry) => {
+      const color = colorForCharacter(entry.characterOwner, entry.characterId);
+      try {
+        const res = await readJsonFile(`users/${entry.characterOwner}/characters/${entry.characterId}.json`);
+        if (!res) return [];
+        const c = res.data;
+        const name = c.basic?.name || entry.characterId;
+        const photoUrl = c.basic?.photoUrl || "";
+        return (c.rollHistory || []).map((h) => ({ ...h, charName: name, charPhoto: photoUrl, color }));
+      } catch {
+        return [];
+      }
+    })
+  );
+  const all = perCharacter.flat();
+  all.sort((a, b) => new Date(b.time) - new Date(a.time));
+  return all.slice(0, 60);
+}
+
+async function addMonster(slug, monster) {
+  const res = await readJsonFile(`campaigns/${slug}/monsters.json`);
+  const list = res ? res.data : [];
+  const sha = res ? res.sha : null;
+  const updated = [...list, { id: uid(), ...monster }];
+  await writeJsonFile(`campaigns/${slug}/monsters.json`, updated, sha, `feat: adiciona monstro "${monster.name}"`);
+}
+
+async function removeMonster(slug, monsterId) {
+  const res = await readJsonFile(`campaigns/${slug}/monsters.json`);
+  if (!res) return;
+  const updated = res.data.filter((m) => m.id !== monsterId);
+  await writeJsonFile(`campaigns/${slug}/monsters.json`, updated, res.sha, `chore: remove monstro`);
 }
 
 async function linkCharacterToCampaign(slug, ownerUsername, characterId) {
@@ -251,7 +368,13 @@ function rollDice(notation) {
   if (count < 1 || count > 100 || sides < 2) return null;
   const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
   const total = rolls.reduce((a, b) => a + b, 0) + mod;
-  return { notation, rolls, mod, total };
+  return { notation, rolls, mod, total, count, sides };
+}
+
+// Falha crítica: só se aplica a testes de 1d20 puro (perícias e testes de
+// ataque), quando o dado sai 1 natural.
+function isNat1D20(rollResult) {
+  return !!rollResult && rollResult.count === 1 && rollResult.sides === 20 && rollResult.rolls[0] === 1;
 }
 
 function parseCritThreshold(critRange) {
@@ -277,6 +400,7 @@ function doRoll(dice, bonus, label, critRange, critMultiplier) {
   const threshold = parseCritThreshold(critRange);
   const multiplier = parseFloat(critMultiplier) || 1;
   const isCrit = threshold !== null && result.rolls.some((r) => r >= threshold);
+  const isFumble = !isCrit && isNat1D20(base);
 
   let finalTotal = result.total;
   let critNote = "";
@@ -286,6 +410,8 @@ function doRoll(dice, bonus, label, critRange, critMultiplier) {
     critNote = ` — CRÍTICO ×${multiplier}!`;
   } else if (isCrit) {
     critNote = " — CRÍTICO!";
+  } else if (isFumble) {
+    critNote = " — FALHA CRÍTICA!";
   }
 
   toast = {
@@ -293,6 +419,7 @@ function doRoll(dice, bonus, label, critRange, critMultiplier) {
     roll: `${result.notation} → [${result.rolls.join(", ")}] ${result.mod >= 0 ? "+" : ""}${result.mod}`,
     total: finalTotal,
     crit: isCrit,
+    fumble: isFumble,
   };
   pushRollHistory(toast);
   render();
@@ -310,6 +437,7 @@ function pushRollHistory(entry) {
     roll: entry.roll,
     total: entry.total,
     crit: !!entry.crit,
+    fumble: !!entry.fumble,
   });
   if (character.rollHistory.length > 30) character.rollHistory.length = 30;
   scheduleSave();
@@ -341,6 +469,7 @@ function doAttackTest(attack) {
   const threshold = parseCritThreshold(attack.critRange);
   const multiplier = parseFloat(attack.critMultiplier) || 1;
   const isCrit = threshold !== null && testRoll.rolls.some((r) => r >= threshold);
+  const isFumble = !isCrit && isNat1D20(testRoll);
 
   let dmgTotal = dmgRoll.total;
   let critNote = "";
@@ -350,6 +479,9 @@ function doAttackTest(attack) {
     critNote = ` — CRÍTICO ×${multiplier}!`;
   } else if (isCrit) {
     critNote = " — CRÍTICO!";
+  } else if (isFumble) {
+    critNote = " — FALHA CRÍTICA!";
+    dmgTotal = 0;
   }
 
   toast = {
@@ -357,6 +489,7 @@ function doAttackTest(attack) {
     roll: `Teste (${skill.name}): 1d20 → [${testRoll.rolls.join(", ")}] ${testBonus >= 0 ? "+" : ""}${testBonus} = ${testTotal}  |  Dano: ${dmgRoll.notation} → [${dmgRoll.rolls.join(", ")}]`,
     total: dmgTotal,
     crit: isCrit,
+    fumble: isFumble,
   };
   pushRollHistory(toast);
   render();
@@ -371,6 +504,7 @@ function esc(str) {
 
 // ---------- Salvamento automático ----------
 function scheduleSave() {
+  if (sheetReadOnly) return;
   saveStatus = "editando";
   clearTimeout(saveTimer);
   saveTimer = setTimeout(performSave, 1200);
@@ -517,37 +651,92 @@ function renderCampaigns() {
     </div>`;
 }
 
+function miniBar(current, max, color) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
+  return `<div class="mini-bar-track"><div class="mini-bar-fill" style="width:${pct}%;background:${color};"></div></div>`;
+}
+
 function renderCampaignDashboard() {
   const user = getStoredUser();
   const cd = currentCampaign;
   if (!cd) return `<div class="center-box"><p>Carregando campanha...</p></div>`;
 
   const isGm = cd.members.some((m) => m.username === user.login && m.role === "gm");
+  const hydrated = cd.linkedHydrated || [];
 
-  const linkedItems = cd.linked
-    .map(
-      (entry) => `
-      <li class="linked-item">
-        <span><strong>${esc(entry.characterOwner)}</strong> — ${esc(entry.characterId)}</span>
-        <span style="display:flex;gap:10px;align-items:center;">
-          <button class="btn-link" data-action="open-linked-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">abrir ficha</button>
-          ${isGm ? `<button class="btn-link danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
-        </span>
-      </li>`
-    )
+  const linkedItems = hydrated
+    .map((entry) => {
+      if (entry.missing) {
+        return `
+        <li class="char-card" style="border-color:${entry.color};">
+          <div class="char-card-top">
+            <span><strong>${esc(entry.characterOwner)}</strong> — ${esc(entry.characterId)} <span class="helper-text">(não encontrado)</span></span>
+            ${isGm ? `<button class="btn-link danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
+          </div>
+        </li>`;
+      }
+      const xpPct = entry.xpNeeded > 0 ? Math.max(0, Math.min(100, (entry.xp / entry.xpNeeded) * 100)) : 0;
+      return `
+      <li class="char-card" style="border-color:${entry.color};">
+        <div class="char-card-top">
+          <div class="char-card-identity">
+            <div class="char-card-avatar" style="border-color:${entry.color};">
+              ${entry.photoUrl ? `<img src="${esc(entry.photoUrl)}" alt="">` : ICONS.user}
+            </div>
+            <div>
+              <div class="char-card-name">${esc(entry.name)}</div>
+              <div class="char-card-meta">
+                Nv. ${entry.level}${entry.className ? ` · ${esc(entry.className)}` : ""} · dono: ${esc(entry.characterOwner)}
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <button class="btn-link" data-action="open-linked-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">abrir ficha</button>
+            ${isGm ? `<button class="btn-link danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
+          </div>
+        </div>
+        <div class="char-card-bars">
+          <div class="char-card-bar-row">
+            <span class="hp-value">HP ${entry.hpCurrent}/${entry.hpMax}</span>
+            ${miniBar(entry.hpCurrent, entry.hpMax, "var(--stamp)")}
+          </div>
+          <div class="char-card-bar-row">
+            <span>MP ${entry.mpCurrent}/${entry.mpMax}</span>
+            ${miniBar(entry.mpCurrent, entry.mpMax, "var(--teal)")}
+          </div>
+          <div class="char-card-bar-row">
+            <span>XP ${entry.xp}/${entry.xpNeeded}</span>
+            ${miniBar(entry.xp, entry.xpNeeded, "var(--violet)")}
+          </div>
+        </div>
+      </li>`;
+    })
     .join("");
 
   const membersItems = cd.members
     .map((m) => `<li>${esc(m.username)} — <span class="helper-text" style="display:inline;">${m.role === "gm" ? "Mestre" : "Jogador"}</span></li>`)
     .join("");
 
+  const monsterItems = (cd.monsters || [])
+    .map(
+      (m) => `
+      <li class="monster-item">
+        <span class="monster-name">${esc(m.name)}</span>
+        <span class="monster-stats">Nv. ${esc(String(m.level))} · <span class="hp-value">HP ${esc(String(m.hp))}</span> · MP ${esc(String(m.mp))}</span>
+        ${isGm ? `<button class="btn-link danger" data-action="remove-monster" data-id="${esc(m.id)}">remover</button>` : ""}
+      </li>`
+    )
+    .join("");
+
   return `
     <div class="center-box">
-      <div class="login-card" style="max-width:560px;">
-        <button class="btn-link" data-action="back-to-campaigns" style="margin-bottom:10px;display:block;">← minhas campanhas</button>
+      <div class="login-card" style="max-width:640px;">
+        <button class="btn-back" data-action="back-to-campaigns" style="margin-bottom:10px;display:block;">← minhas campanhas</button>
         <div class="eyebrow">Painel da Campanha</div>
         <h1 class="char-name" style="margin-bottom:1rem;">${esc(cd.campaign.name)}</h1>
         ${campaignDashError ? `<p class="login-error">${esc(campaignDashError)}</p>` : ""}
+
+        <button class="btn-link" data-action="toggle-campaign-history" style="margin-bottom:10px;display:block;">histórico de rolagens da campanha</button>
 
         <h2 class="section-title">Personagens Vinculados</h2>
         <ul class="linked-list">${linkedItems || `<li class="helper-text">Nenhum personagem vinculado ainda.</li>`}</ul>
@@ -566,8 +755,65 @@ function renderCampaignDashboard() {
             : ""
         }
 
+        <h2 class="section-title" style="margin-top:1.5rem;">Monstros</h2>
+        <ul class="monster-list">${monsterItems || `<li class="helper-text">Nenhum monstro criado.</li>`}</ul>
+        ${
+          isGm
+            ? `
+        <p class="helper-text" style="margin:8px 0;">Só informações essenciais: nome, nível, HP e MP.</p>
+        ${monsterFormError ? `<p class="login-error">${esc(monsterFormError)}</p>` : ""}
+        <div class="monster-form">
+          <input type="text" id="monster-name-input" placeholder="Nome" />
+          <input type="number" id="monster-level-input" placeholder="Nível" style="width:80px;" />
+          <input type="number" id="monster-hp-input" placeholder="HP" style="width:80px;" />
+          <input type="number" id="monster-mp-input" placeholder="MP" style="width:80px;" />
+          <button class="btn btn-teal" data-action="do-add-monster">+ criar monstro</button>
+        </div>`
+            : ""
+        }
+
         <h2 class="section-title" style="margin-top:1.5rem;">Membros</h2>
         <ul class="members-list">${membersItems}</ul>
+      </div>
+    </div>`;
+}
+
+// Painel de histórico de rolagens agregando todos os personagens vinculados
+// à campanha — visível a todos os membros (mestre e jogadores).
+function renderCampaignHistoryPanel() {
+  if (!showCampaignHistory) return "";
+  const body = campaignHistoryLoading
+    ? `<p class="helper-text">Carregando...</p>`
+    : (campaignHistoryEntries
+        .map((h) => {
+          const time = new Date(h.time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+          const stateClass = h.crit ? "is-crit" : h.fumble ? "is-fumble" : "";
+          return `
+          <div class="history-entry ${stateClass}">
+            <div class="history-entry-top">
+              <span class="history-entry-char" style="color:${h.color};">
+                <span class="history-avatar" style="border-color:${h.color};">
+                  ${h.charPhoto ? `<img src="${esc(h.charPhoto)}" alt="">` : ICONS.user}
+                </span>
+                ${esc(h.charName)}
+              </span>
+              <span class="history-time">${esc(time)}</span>
+            </div>
+            <div class="history-label">${esc(h.label)}</div>
+            <div class="history-roll">${esc(h.roll)}</div>
+            ${h.total !== null && h.total !== undefined ? `<div class="history-total">${esc(String(h.total))}</div>` : ""}
+          </div>`;
+        })
+        .join("") || `<p class="helper-text">Nenhuma rolagem ainda.</p>`);
+
+  return `
+    <div class="history-overlay" data-action="close-campaign-history-bg">
+      <div class="history-panel">
+        <div class="history-panel-header">
+          <span>Histórico de Rolagens da Campanha</span>
+          <button class="btn-link" data-action="toggle-campaign-history">fechar ✕</button>
+        </div>
+        <div class="history-list">${body}</div>
       </div>
     </div>`;
 }
@@ -611,13 +857,7 @@ function renderBasic() {
 
 function renderClass() {
   const cl = character.classInfo;
-  if (cl.skipped) {
-    return `
-      <span class="stamp">etapa pulada</span>
-      <p class="helper-text">Nenhuma classe definida. Você pode preencher isso a qualquer momento.</p>
-      <button class="btn btn-teal" data-action="class-start">Definir uma classe</button>`;
-  }
-  const fieldsHtml = cl.fields
+  const fieldsHtml = (cl.fields || [])
     .map(
       (f, i) => `
       <div class="class-fields-row">
@@ -634,42 +874,49 @@ function renderClass() {
     <span class="field-label" style="display:block;margin-bottom:8px;">Campos livres</span>
     ${fieldsHtml}
     <button class="btn-add" data-action="class-add-field">${ICONS.plus} campo</button>
-    <div style="margin-top:14px;display:flex;gap:16px;align-items:center;">
+
+    <label class="field" style="margin-top:14px;">
+      <span class="field-label">Informações adicionais</span>
+      <textarea rows="4" data-bind="classInfo.notes" placeholder="Descrição da classe, habilidades passivas, história, observações...">${esc(cl.notes || "")}</textarea>
+    </label>
+
+    <div style="margin-top:14px;">
       <button class="btn btn-stamp" data-action="class-confirm">Concluir criação da classe</button>
-      <button class="btn-link danger" data-action="class-skip">pular esta etapa</button>
     </div>
     ${classConfirm ? `<div class="confirm-msg">✓ Classe "${esc(cl.name || "sem nome")}" salva.</div>` : ""}`;
 }
 
 function renderResources() {
   const r = character.resources;
-  function bar(label, currentKey, maxKey, color) {
+  function bar(label, currentKey, maxKey, color, textClass) {
     const current = r[currentKey];
     const max = r[maxKey];
     const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
+    const tc = textClass || "";
     return `
       <div class="bar-block">
         <div class="bar-top">
-          <span class="field-label" style="margin:0;">${label}</span>
-          <span style="font-family:'Special Elite',monospace;font-size:13px;">${current} / ${max}</span>
+          <span class="field-label ${tc}" style="margin:0;">${label}</span>
+          <span class="${tc}" style="font-family:'Special Elite',monospace;font-size:13px;">${current} / ${max}</span>
         </div>
         <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
         <div class="bar-inputs">
           <span>atual</span>
-          <input type="number" data-bind="resources.${currentKey}" data-numeric="true" value="${current}" />
+          <input type="number" class="${tc}" data-bind="resources.${currentKey}" data-numeric="true" value="${current}" />
           <span>máx.</span>
-          <input type="number" data-bind="resources.${maxKey}" data-numeric="true" value="${max}" />
+          <input type="number" class="${tc}" data-bind="resources.${maxKey}" data-numeric="true" value="${max}" />
         </div>
       </div>`;
   }
 
   const xpNeeded = xpNeededForLevel(r.level);
   const xpPct = Math.max(0, Math.min(100, (r.xp / xpNeeded) * 100));
+  const isMaxLevel = r.level >= MAX_LEVEL;
 
   return `
     <div class="level-row">
       <div>
-        <span class="field-label" style="display:block;">Nível</span>
+        <span class="field-label" style="display:block;">Nível ${isMaxLevel ? '<span class="max-tag">MÁX.</span>' : ""}</span>
         <div class="level-number">${r.level}</div>
       </div>
       <button class="btn btn-stamp" data-action="level-down" ${r.level <= 1 ? "disabled" : ""}>Reduzir Nível</button>
@@ -682,22 +929,22 @@ function renderResources() {
       </div>
       <div class="bar-track"><div class="bar-fill" style="width:${xpPct}%;background:#3b6fd6;"></div></div>
       <div class="bar-inputs">
-        <input type="number" id="xp-gain-input" placeholder="quantidade" style="width:110px;" />
-        <button class="btn btn-teal" data-action="add-xp" style="padding:6px 12px;font-size:12px;">+ adicionar XP</button>
+        <input type="number" id="xp-gain-input" placeholder="quantidade" max="${MAX_XP_PER_ADD}" min="1" style="width:110px;" ${isMaxLevel ? "disabled" : ""} />
+        <button class="btn btn-teal" data-action="add-xp" style="padding:6px 12px;font-size:12px;" ${isMaxLevel ? "disabled" : ""}>+ adicionar XP</button>
       </div>
       <p class="helper-text" style="font-size:12px;margin-top:6px;">
-        Some XP livremente; o personagem sobe quantos níveis forem necessários e mantém o restante automaticamente.
+        Máximo de ${MAX_XP_PER_ADD} XP por vez. O personagem sobe quantos níveis forem necessários (até o nível ${MAX_LEVEL}) e mantém o restante automaticamente.
       </p>
     </div>
 
-    <div class="bar-block">
+    <div class="bar-block gold-block">
       <div class="bar-top">
-        <span class="field-label" style="margin:0;">Gold</span>
+        <span class="field-label gold-value" style="margin:0;">Gold</span>
       </div>
-      <input type="number" data-bind="resources.gold" data-numeric="true" value="${r.gold || 0}" />
+      <input type="number" class="gold-value" data-bind="resources.gold" data-numeric="true" value="${r.gold || 0}" />
     </div>
 
-    ${bar("HP", "hpCurrent", "hpMax", "var(--stamp)")}
+    ${bar("HP", "hpCurrent", "hpMax", "var(--stamp)", "hp-value")}
     ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}`;
 }
 
@@ -707,10 +954,12 @@ function renderSkills() {
       const trainingOptions = TRAINING_LEVELS
         .map((t) => `<option value="${t.value}" ${Number(s.training || 0) === t.value ? "selected" : ""}>${t.label}</option>`)
         .join("");
+      const atExpert = Number(s.training || 0) >= 15;
       return `
       <div class="skill-row" data-id="${s.id}">
         <input type="text" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
         <select class="training-select" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
+        <button class="promote-btn" data-action="promote-training" data-id="${s.id}" title="Sobe uma patente de treinamento" ${atExpert ? "disabled" : ""}>▲</button>
         <input type="number" class="buff" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
         <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
         ${s.mandatory ? "" : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
@@ -720,7 +969,8 @@ function renderSkills() {
   return `
     <p class="helper-text" style="margin-bottom:10px;">
       Toda perícia rola sempre 1d20 + treinamento + buff. Luta, Pontaria e Magia não podem ser removidas
-      (são usadas nos testes de ataque, na aba Ataques).
+      (são usadas nos testes de ataque, na aba Ataques). Use o botão ▲ pra subir uma patente de treinamento
+      (Destreinado → Treinado → Veterano → Expert).
     </p>
     ${rows}<button class="btn-add" data-action="add-skill">${ICONS.plus} adicionar perícia</button>`;
 }
@@ -830,11 +1080,13 @@ function renderSheet() {
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
           <span class="stamp">confidencial</span>
           <button class="btn-link" data-action="toggle-history">histórico de rolagens</button>
-          <button class="btn-link" data-action="back-to-list">← meus personagens</button>
+          ${sheetCampaignSlug ? `<button class="btn-back" data-action="back-to-campaign">← voltar para campanha</button>` : ""}
+          <button class="btn-back" data-action="back-to-list">← meus personagens</button>
         </div>
       </div>
       <div class="tabs">${tabsHtml}</div>
-      <div class="tab-content">${renderTabContent()}</div>
+      ${sheetReadOnly ? `<div class="readonly-banner">👁 Somente leitura — você não tem permissão para editar a ficha deste personagem.</div>` : ""}
+      <div class="tab-content ${sheetReadOnly ? "readonly-lock" : ""}">${renderTabContent()}</div>
     </div>`;
 }
 
@@ -842,15 +1094,21 @@ function renderSheet() {
 // quanto o mestre (ao abrir a ficha vinculada pela campanha) veem as mesmas entradas.
 function renderHistoryPanel() {
   if (!showHistory) return "";
+  const photoUrl = character.basic?.photoUrl || "";
   const entries = (character.rollHistory || [])
     .map((h) => {
       const time = new Date(h.time).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      const stateClass = h.crit ? "is-crit" : h.fumble ? "is-fumble" : "";
       return `
-      <div class="history-entry ${h.crit ? "is-crit" : ""}">
+      <div class="history-entry ${stateClass}">
         <div class="history-entry-top">
-          <span class="history-label">${esc(h.label)}</span>
+          <span class="history-entry-char">
+            <span class="history-avatar">${photoUrl ? `<img src="${esc(photoUrl)}" alt="">` : ICONS.user}</span>
+            ${esc(character.basic?.name || "")}
+          </span>
           <span class="history-time">${esc(time)}</span>
         </div>
+        <div class="history-label">${esc(h.label)}</div>
         <div class="history-roll">${esc(h.roll)}</div>
         ${h.total !== null && h.total !== undefined ? `<div class="history-total">${esc(String(h.total))}</div>` : ""}
       </div>`;
@@ -871,9 +1129,11 @@ function renderHistoryPanel() {
 
 function renderToast() {
   if (!toast) return "";
+  const flashClass = toast.crit ? "crit-flash" : toast.fumble ? "fumble-flash" : "";
+  const toastClass = toast.crit ? "toast-crit" : toast.fumble ? "toast-fumble" : "";
   return `
-    ${toast.crit ? `<div class="crit-flash"></div>` : ""}
-    <div class="toast ${toast.crit ? "toast-crit" : ""}">
+    ${flashClass ? `<div class="${flashClass}"></div>` : ""}
+    <div class="toast ${toastClass}">
       <div class="toast-label">${esc(toast.label)}</div>
       <div class="toast-roll">${esc(toast.roll)}</div>
       ${toast.total !== null ? `<div class="toast-total">${toast.total}</div>` : ""}
@@ -891,7 +1151,11 @@ function render() {
   else if (screen === "campaign-dashboard") html = renderCampaignDashboard();
   else if (screen === "sheet") html = renderSheet();
 
-  app.innerHTML = html + renderToast() + (screen === "sheet" ? renderHistoryPanel() : "");
+  app.innerHTML =
+    html +
+    renderToast() +
+    (screen === "sheet" ? renderHistoryPanel() : "") +
+    (screen === "campaign-dashboard" ? renderCampaignHistoryPanel() : "");
   attachEvents();
   if (screen === "sheet") updateSaveIndicator();
 }
@@ -957,6 +1221,9 @@ async function openCampaignDashboardScreen(slug) {
   screen = "campaign-dashboard";
   campaignDashError = "";
   currentCampaign = null;
+  showCampaignHistory = false;
+  campaignHistoryEntries = [];
+  monsterFormError = "";
   render();
   try {
     currentCampaign = await loadCampaignDashboard(slug);
@@ -999,6 +1266,8 @@ async function createNewCharacter() {
   const id = uid();
   const path = `users/${user.login}/characters/${id}.json`;
   const newChar = emptyCharacter();
+  sheetReadOnly = false;
+  sheetCampaignSlug = null;
   try {
     await writeJsonFile(path, newChar, null, `feat: cria personagem "${newChar.basic.name}"`);
     character = newChar;
@@ -1016,7 +1285,7 @@ async function createNewCharacter() {
   }
 }
 
-async function openCharacter(path) {
+async function openCharacterCore(path) {
   try {
     const result = await readJsonFile(path);
     if (!result) throw new Error("Arquivo não encontrado");
@@ -1031,6 +1300,25 @@ async function openCharacter(path) {
     listError = "Falha ao abrir personagem: " + (err.message || err);
     render();
   }
+}
+
+// Abertura a partir de "Meus Personagens": sempre edição total, sem vínculo
+// de campanha (não mostra o botão "voltar para campanha").
+async function openCharacter(path) {
+  sheetReadOnly = false;
+  sheetCampaignSlug = null;
+  await openCharacterCore(path);
+}
+
+// Abertura a partir de um painel de campanha: só o dono do personagem ou o
+// mestre da campanha podem editar; qualquer outro membro vê em modo leitura.
+async function openLinkedCharacter(owner, characterId, slug) {
+  const user = getStoredUser();
+  const isSelf = owner === user.login;
+  const isGm = !!(currentCampaign && currentCampaign.members.some((m) => m.username === user.login && m.role === "gm"));
+  sheetReadOnly = !(isSelf || isGm);
+  sheetCampaignSlug = slug;
+  await openCharacterCore(`users/${owner}/characters/${characterId}.json`);
 }
 
 // ---------- Eventos ----------
@@ -1115,6 +1403,13 @@ function attachEvents() {
     });
   });
 
+  document.querySelectorAll("[data-action='back-to-campaign']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      clearTimeout(saveTimer);
+      if (sheetCampaignSlug) openCampaignDashboardScreen(sheetCampaignSlug);
+    });
+  });
+
   document.querySelectorAll("[data-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       activeTab = btn.dataset.tab;
@@ -1196,7 +1491,7 @@ function attachEvents() {
   });
 
   document.querySelectorAll("[data-action='open-linked-character']").forEach((btn) => {
-    btn.addEventListener("click", () => openCharacter(`users/${btn.dataset.owner}/characters/${btn.dataset.id}.json`));
+    btn.addEventListener("click", () => openLinkedCharacter(btn.dataset.owner, btn.dataset.id, currentCampaignSlug));
   });
 
   document.querySelectorAll("[data-action='roll-ability']").forEach((btn) => {
@@ -1206,9 +1501,7 @@ function attachEvents() {
     });
   });
 
-  bindAction("class-start", () => { character.classInfo = { skipped: false, name: "", fields: [] }; });
   bindAction("class-add-field", () => { character.classInfo.fields.push(["", ""]); });
-  bindAction("class-skip", () => { character.classInfo = { skipped: true, name: "", fields: [] }; classConfirm = false; });
   bindAction("class-confirm", () => { classConfirm = true; });
 
   document.querySelectorAll("[data-class-field]").forEach((input) => {
@@ -1233,6 +1526,86 @@ function attachEvents() {
         showHistory = false;
         render();
       }
+    });
+  });
+
+  document.querySelectorAll("[data-action='toggle-campaign-history']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      showCampaignHistory = !showCampaignHistory;
+      if (showCampaignHistory && currentCampaign) {
+        campaignHistoryLoading = true;
+        render();
+        try {
+          campaignHistoryEntries = await loadCampaignRollHistory(currentCampaignSlug, currentCampaign.linked);
+        } catch {
+          campaignHistoryEntries = [];
+        }
+        campaignHistoryLoading = false;
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='close-campaign-history-bg']").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target === el) {
+        showCampaignHistory = false;
+        render();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-action='promote-training']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (sheetReadOnly) return;
+      const s = character.skills.find((x) => x.id === btn.dataset.id);
+      if (!s) return;
+      const levels = TRAINING_LEVELS.map((t) => t.value);
+      const idx = levels.indexOf(Number(s.training || 0));
+      if (idx >= 0 && idx < levels.length - 1) s.training = levels[idx + 1];
+      render();
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='do-add-monster']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const nameEl = document.getElementById("monster-name-input");
+      const levelEl = document.getElementById("monster-level-input");
+      const hpEl = document.getElementById("monster-hp-input");
+      const mpEl = document.getElementById("monster-mp-input");
+      const name = nameEl ? nameEl.value.trim() : "";
+      if (!name) {
+        monsterFormError = "Dê um nome ao monstro.";
+        render();
+        return;
+      }
+      const monster = {
+        name,
+        level: levelEl && levelEl.value ? Number(levelEl.value) : 1,
+        hp: hpEl && hpEl.value ? Number(hpEl.value) : 0,
+        mp: mpEl && mpEl.value ? Number(mpEl.value) : 0,
+      };
+      try {
+        await addMonster(currentCampaignSlug, monster);
+        monsterFormError = "";
+        currentCampaign = await loadCampaignDashboard(currentCampaignSlug);
+      } catch (err) {
+        monsterFormError = "Falha ao criar monstro: " + (err.message || err);
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='remove-monster']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await removeMonster(currentCampaignSlug, btn.dataset.id);
+        currentCampaign = await loadCampaignDashboard(currentCampaignSlug);
+      } catch (err) {
+        campaignDashError = "Falha ao remover monstro: " + (err.message || err);
+      }
+      render();
     });
   });
 
