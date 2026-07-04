@@ -512,7 +512,7 @@ textarea { resize: vertical; }
 .promote-btn:hover { box-shadow: 0 0 14px var(--gold-glow); }
 
 .skill-row {
-  padding: 10px 0;
+  padding: 5px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -524,7 +524,7 @@ textarea { resize: vertical; }
   border-bottom: 1px solid var(--border);
 }
 
-.skill-name { margin-bottom: 6px; }
+.skill-name { margin-bottom: 3px; }
 .skill-row input[readonly] { opacity: 0.75; border-style: dashed; }
 
 .skill-row-controls {
@@ -1368,4 +1368,25 @@ button:disabled {
 }
 @media (max-width: 420px) {
   .bestiary-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- Barra de rolagem customizada ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--teal) var(--paper-dark);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: var(--paper-dark);
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--teal);
 }
