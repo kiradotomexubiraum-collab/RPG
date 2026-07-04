@@ -572,6 +572,8 @@ function doRoll(dice, bonus, label, critRange, critMultiplier) {
     total: finalTotal,
     crit: isCrit,
     fumble: isFumble,
+    sides: base.sides,
+    diceResults: base.rolls,
   };
   animateRoll(label, base.sides, base.count, finalToast);
 }
@@ -591,11 +593,33 @@ function animateRoll(baseLabel, sides, diceCount, finalToast) {
       return;
     }
     const fake = Array.from({ length: diceCount || 1 }, () => 1 + Math.floor(Math.random() * (sides || 20)));
-    toast = { rolling: true, label: baseLabel, roll: `[${fake.join(", ")}]`, total: null };
+    toast = { rolling: true, label: baseLabel, sides: sides || 20, fakeValues: fake, total: null };
     render();
     setTimeout(step, 70);
   };
   step();
+}
+
+// Gera os pontos de um polígono regular com N lados (visual do dado —
+// quanto mais lados o dado tiver, mais "arredondado" o polígono fica).
+function diceShapePoints(sides) {
+  const n = Math.max(3, Math.min(sides || 20, 20));
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    const x = 50 + 44 * Math.cos(angle);
+    const y = 50 + 44 * Math.sin(angle);
+    pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+  return pts.join(" ");
+}
+
+function renderDie(sides, value, extraClass) {
+  return `
+    <div class="die-shape ${extraClass || ""}">
+      <svg viewBox="0 0 100 100"><polygon points="${diceShapePoints(sides)}" /></svg>
+      <span class="die-value">${value}</span>
+    </div>`;
 }
 
 // Guarda as últimas rolagens na própria ficha (persistida no GitHub junto com o resto),
@@ -662,6 +686,8 @@ function doAttackTest(attack) {
     total: dmgTotal,
     crit: isCrit,
     fumble: isFumble,
+    sides: 20,
+    diceResults: testRoll.rolls,
   };
   animateRoll(`Ataque: ${attack.name}`, 20, 1, finalToast);
 }
@@ -1378,11 +1404,11 @@ function renderSkills() {
       const atExpert = Number(s.training || 0) >= 15;
       return `
       <div class="skill-row" data-id="${s.id}">
-        <input type="text" class="skill-name" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
+        <input type="text" class="skill-name skill-input" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
         <div class="skill-row-controls">
-          <select class="training-select" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
+          <select class="training-select skill-input" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
           <button class="promote-btn" data-action="promote-training" data-id="${s.id}" title="Sobe uma patente de treinamento" ${atExpert ? "disabled" : ""}>▲</button>
-          <input type="number" class="buff" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
+          <input type="number" class="buff skill-input" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
           <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
           ${s.mandatory ? "" : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
         </div>
@@ -1390,9 +1416,8 @@ function renderSkills() {
     })
     .join("");
   return `
-    <p class="helper-text" style="margin-bottom:10px;">
-      Toda perícia rola sempre 1d20 + treinamento + buff. Luta, Pontaria e Magia não podem ser removidas.
-      Use ▲ pra subir uma patente (Destreinado → Treinado → Veterano → Expert).
+    <p class="helper-text" style="margin-bottom:6px;">
+      1d20 + treinamento + buff. ▲ sobe patente (Destreinado → Expert).
     </p>
     ${rows}<button class="btn-add" data-action="add-skill">${ICONS.plus} adicionar perícia</button>`;
 }
@@ -1557,20 +1582,33 @@ function renderHistoryPanel() {
 function renderToast() {
   if (!toast) return "";
   if (toast.rolling) {
+    const diceHtml = (toast.fakeValues || []).map((v) => renderDie(toast.sides, v, "die-spinning")).join("");
     return `
-      <div class="toast rolling">
-        <div class="toast-label"><span class="dice-spin">🎲</span> ${esc(toast.label)}</div>
-        <div class="toast-roll">${esc(toast.roll)}</div>
+      <div class="dice-overlay">
+        <div class="toast rolling">
+          <div class="dice-stage">${diceHtml}</div>
+          <div class="toast-label">${esc(toast.label)}</div>
+        </div>
       </div>`;
   }
-  const flashClass = toast.crit ? "crit-flash" : toast.fumble ? "fumble-flash" : "";
+  const sides = toast.sides || 0;
+  const diceResults = toast.diceResults || [];
+  const hasMax = sides > 1 && diceResults.some((v) => v === sides);
+  const hasMin = sides > 1 && diceResults.some((v) => v === 1);
+  const flashClass = hasMax ? "crit-flash" : hasMin ? "fumble-flash" : "";
   const toastClass = toast.crit ? "toast-crit" : toast.fumble ? "toast-fumble" : "";
+  const diceHtml = diceResults.length
+    ? diceResults.map((v) => renderDie(sides, v, v === sides ? "die-max" : v === 1 ? "die-min" : "")).join("")
+    : "";
   return `
     ${flashClass ? `<div class="${flashClass}"></div>` : ""}
-    <div class="toast ${toastClass}">
-      <div class="toast-label">${esc(toast.label)}</div>
-      <div class="toast-roll">${esc(toast.roll)}</div>
-      ${toast.total !== null ? `<div class="toast-total">${toast.total}</div>` : ""}
+    <div class="dice-overlay">
+      <div class="toast ${toastClass}">
+        ${diceHtml ? `<div class="dice-stage">${diceHtml}</div>` : ""}
+        <div class="toast-label">${esc(toast.label)}</div>
+        <div class="toast-roll">${esc(toast.roll)}</div>
+        ${toast.total !== null ? `<div class="toast-total">${toast.total}</div>` : ""}
+      </div>
     </div>`;
 }
 
