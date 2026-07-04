@@ -4,6 +4,6 @@
 // Esse repositório PRECISA existir e o token usado no login precisa
 // ter acesso de leitura e escrita a ele (Contents: Read and write).
 const GITHUB_CONFIG = {
-  owner: "SEU-USUARIO-AQUI",
-  repo: "rpg-data",
+  owner: "kiradotomexubiraum",
+  repo: "RPG-data",
 };
