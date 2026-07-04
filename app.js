@@ -477,7 +477,6 @@ async function unlinkCharacterFromCampaign(slug, ownerUsername, characterId) {
 
 const TABS = [
   { id: "class", label: "Classe", icon: "layers" },
-  { id: "skills", label: "Perícias", icon: "sparkles" },
   { id: "abilities", label: "Habilidades", icon: "wand" },
   { id: "items", label: "Itens", icon: "backpack" },
   { id: "attacks", label: "Ataques", icon: "swords" },
@@ -1180,6 +1179,8 @@ function renderBestiary() {
 // ---------- Conteúdo das abas (idêntico ao protótipo anterior) ----------
 function renderBasic() {
   const b = character.basic;
+  const idMatch = currentPath ? currentPath.match(/characters\/(.+)\.json$/) : null;
+  const shortId = idMatch ? idMatch[1] : "";
   return `
     <div class="avatar-row">
       <label class="avatar avatar-upload" title="Clique para escolher uma foto do seu dispositivo">
@@ -1214,7 +1215,8 @@ function renderBasic() {
         <span class="field-label">Altura</span>
         <input type="text" data-bind="basic.height" value="${esc(b.height)}" placeholder="ex: 1,75m" />
       </label>
-    </div>`;
+    </div>
+    ${shortId ? `<button class="btn-copy-id" data-action="copy-id" data-id="${esc(shortId)}">ID: ${esc(shortId)} (copiar)</button>` : ""}`;
 }
 
 function renderClass() {
@@ -1256,12 +1258,12 @@ function renderResources() {
     const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
     const tc = textClass || "";
     return `
-      <div class="bar-block bar-block-${currentKey}">
+      <div class="bar-block bar-block-compact bar-block-${currentKey}">
         <div class="bar-top">
           <span class="field-label ${tc}" style="margin:0;">${label}</span>
           <span class="${tc}" style="font-family:'Special Elite',monospace;font-size:13px;">${current} / ${max}</span>
         </div>
-        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
+        <div class="bar-track bar-track-compact"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
         <div class="bar-inputs">
           <span>atual</span>
           <input type="number" class="${tc}" data-bind="resources.${currentKey}" data-numeric="true" value="${current}" />
@@ -1276,38 +1278,36 @@ function renderResources() {
   const isMaxLevel = r.level >= MAX_LEVEL;
 
   return `
-    <div class="level-row">
+    <div class="level-row-compact">
       <div>
         <span class="field-label" style="display:block;">Nível ${isMaxLevel ? '<span class="max-tag">MÁX.</span>' : ""}</span>
-        <div class="level-number">${r.level}</div>
+        <div class="level-number-compact">${r.level}</div>
       </div>
-      <button class="btn btn-stamp" data-action="level-down" ${r.level <= 1 ? "disabled" : ""}>Reduzir Nível</button>
+      <label class="gold-inline">
+        <span class="field-label gold-value" style="margin:0;">Gold</span>
+        <input type="number" class="gold-value" data-bind="resources.gold" data-numeric="true" value="${r.gold || 0}" />
+      </label>
+      <button class="btn btn-stamp btn-compact" data-action="level-down" ${r.level <= 1 ? "disabled" : ""}>Reduzir</button>
     </div>
 
-    <div class="bar-block">
+    <div class="bar-block bar-block-compact">
       <div class="bar-top">
         <span class="field-label" style="margin:0;">XP</span>
         <span style="font-family:'Special Elite',monospace;font-size:13px;">${r.xp} / ${xpNeeded}</span>
       </div>
-      <div class="bar-track"><div class="bar-fill" style="width:${xpPct}%;background:#3b6fd6;"></div></div>
+      <div class="bar-track bar-track-compact"><div class="bar-fill" style="width:${xpPct}%;background:#3b6fd6;"></div></div>
       <div class="bar-inputs">
-        <input type="number" id="xp-gain-input" placeholder="quantidade" max="${MAX_XP_PER_ADD}" min="1" style="width:110px;" ${isMaxLevel ? "disabled" : ""} />
-        <button class="btn btn-teal" data-action="add-xp" style="padding:6px 12px;font-size:12px;" ${isMaxLevel ? "disabled" : ""}>+ adicionar XP</button>
+        <input type="number" id="xp-gain-input" placeholder="qtd." max="${MAX_XP_PER_ADD}" min="1" style="width:80px;" ${isMaxLevel ? "disabled" : ""} />
+        <button class="btn btn-teal btn-compact" data-action="add-xp" ${isMaxLevel ? "disabled" : ""}>+ XP</button>
       </div>
-      <p class="helper-text" style="font-size:12px;margin-top:6px;">
-        Máximo de ${MAX_XP_PER_ADD} XP por vez. O personagem sobe quantos níveis forem necessários (até o nível ${MAX_LEVEL}) e mantém o restante automaticamente.
-      </p>
-    </div>
-
-    <div class="bar-block gold-block">
-      <div class="bar-top">
-        <span class="field-label gold-value" style="margin:0;">Gold</span>
-      </div>
-      <input type="number" class="gold-value" data-bind="resources.gold" data-numeric="true" value="${r.gold || 0}" />
     </div>
 
     ${bar("HP", "hpCurrent", "hpMax", "var(--stamp)", "hp-value")}
-    ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}`;
+    ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}
+
+    <p class="helper-text" style="font-size:11px;margin-top:2px;">
+      Máx. ${MAX_XP_PER_ADD} XP por vez · nível máximo ${MAX_LEVEL}.
+    </p>`;
 }
 
 function renderSkills() {
@@ -1319,20 +1319,21 @@ function renderSkills() {
       const atExpert = Number(s.training || 0) >= 15;
       return `
       <div class="skill-row" data-id="${s.id}">
-        <input type="text" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
-        <select class="training-select" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
-        <button class="promote-btn" data-action="promote-training" data-id="${s.id}" title="Sobe uma patente de treinamento" ${atExpert ? "disabled" : ""}>▲</button>
-        <input type="number" class="buff" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
-        <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
-        ${s.mandatory ? "" : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
+        <input type="text" class="skill-name" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
+        <div class="skill-row-controls">
+          <select class="training-select" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
+          <button class="promote-btn" data-action="promote-training" data-id="${s.id}" title="Sobe uma patente de treinamento" ${atExpert ? "disabled" : ""}>▲</button>
+          <input type="number" class="buff" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
+          <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
+          ${s.mandatory ? "" : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
+        </div>
       </div>`;
     })
     .join("");
   return `
     <p class="helper-text" style="margin-bottom:10px;">
-      Toda perícia rola sempre 1d20 + treinamento + buff. Luta, Pontaria e Magia não podem ser removidas
-      (são usadas nos testes de ataque, na aba Ataques). Use o botão ▲ pra subir uma patente de treinamento
-      (Destreinado → Treinado → Veterano → Expert).
+      Toda perícia rola sempre 1d20 + treinamento + buff. Luta, Pontaria e Magia não podem ser removidas.
+      Use ▲ pra subir uma patente (Destreinado → Treinado → Veterano → Expert).
     </p>
     ${rows}<button class="btn-add" data-action="add-skill">${ICONS.plus} adicionar perícia</button>`;
 }
@@ -1409,7 +1410,6 @@ function renderAttacks() {
 function renderTabContent() {
   switch (activeTab) {
     case "class": return renderClass();
-    case "skills": return renderSkills();
     case "abilities": return renderAbilities();
     case "items": return renderItems();
     case "attacks": return renderAttacks();
@@ -1425,34 +1425,33 @@ function renderSheet() {
     </button>`
   ).join("");
 
-  const idMatch = currentPath ? currentPath.match(/characters\/(.+)\.json$/) : null;
-  const shortId = idMatch ? idMatch[1] : "";
-
   return `
     <div class="sheet">
-      <div class="sheet-header">
-        <div>
-          <div class="eyebrow">Arquivo da Ordem — Ficha de Campo</div>
-          <h1 class="char-name">${esc(character.basic.name)}</h1>
-          <div id="save-indicator" class="save-indicator"></div>
-          ${shortId ? `<button class="btn-copy-id" data-action="copy-id" data-id="${esc(shortId)}" style="margin-top:4px;">ID: ${esc(shortId)} (copiar)</button>` : ""}
+      <div class="sheet-topbar">
+        <div class="sheet-topbar-left">
+          <span class="eyebrow">Arquivo da Ordem</span>
+          <span id="save-indicator" class="save-indicator"></span>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+        <div class="sheet-topbar-right">
           <span class="stamp">confidencial</span>
-          <button class="btn btn-teal" data-action="toggle-history">histórico de rolagens</button>
+          <button class="btn-link" data-action="toggle-history">histórico de rolagens</button>
           ${sheetCampaignSlug ? `<button class="btn-back" data-action="back-to-campaign">← voltar para campanha</button>` : ""}
           <button class="btn-back" data-action="back-to-list">← meus personagens</button>
         </div>
       </div>
       ${sheetReadOnly ? `<div class="readonly-banner">👁 Somente leitura — você não tem permissão para editar a ficha deste personagem.</div>` : ""}
       <div class="sheet-body ${sheetReadOnly ? "readonly-lock" : ""}">
-        <aside class="sheet-sidebar">
+        <aside class="sheet-col sheet-col-left">
           <div class="sidebar-section">${renderBasic()}</div>
           <div class="sidebar-divider"></div>
           <div class="sidebar-section">${renderResources()}</div>
         </aside>
-        <div class="sheet-main">
-          <div class="tabs">${tabsHtml}</div>
+        <div class="sheet-col sheet-col-mid">
+          <h2 class="col-title">${ICONS.sparkles} Perícias</h2>
+          ${renderSkills()}
+        </div>
+        <div class="sheet-col sheet-col-right">
+          <div class="tabs tabs-inline">${tabsHtml}</div>
           <div class="tab-content">${renderTabContent()}</div>
         </div>
       </div>
