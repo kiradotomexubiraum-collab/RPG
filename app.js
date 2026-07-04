@@ -31,15 +31,41 @@ function uid() {
 }
 
 function emptyCharacter() {
+  const lutaId = uid();
+  const pontariaId = uid();
+  const magiaId = uid();
   return {
     basic: { name: "Investigador Sem Nome", photoUrl: "", age: "", weight: "", height: "", financialStatus: "Estável" },
     classInfo: { skipped: true, name: "", fields: [] },
     resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20, xp: 0, gold: 0 },
-    skills: [{ id: uid(), name: "Investigação", bonus: 2, dice: "1d20" }],
+    skills: [
+      { id: lutaId, name: "Luta", bonus: 0, dice: "1d20", mandatory: true },
+      { id: pontariaId, name: "Pontaria", bonus: 0, dice: "1d20", mandatory: true },
+      { id: magiaId, name: "Magia", bonus: 0, dice: "1d20", mandatory: true },
+      { id: uid(), name: "Investigação", bonus: 2, dice: "1d20" },
+    ],
     abilities: [],
     items: [],
-    attacks: [{ id: uid(), name: "Faca de Combate", dice: "1d6+1", critRange: "20", critMultiplier: "2" }],
+    attacks: [{ id: uid(), name: "Faca de Combate", dice: "1d6+1", critRange: "20", critMultiplier: "2", skillId: lutaId }],
   };
+}
+
+// Garante que as perícias obrigatórias (Luta, Pontaria, Magia) existam e estejam
+// marcadas como "mandatory", mesmo em fichas criadas antes desse recurso existir —
+// sem isso o seletor de perícia do ataque ficaria vazio pra quem já tinha ficha salva.
+function normalizeCharacter(character) {
+  const MANDATORY_SKILLS = ["Luta", "Pontaria", "Magia"];
+  if (!character.skills) character.skills = [];
+  MANDATORY_SKILLS.forEach((name) => {
+    const existing = character.skills.find((s) => s.name === name);
+    if (existing) existing.mandatory = true;
+    else character.skills.push({ id: uid(), name, bonus: 0, dice: "1d20", mandatory: true });
+  });
+  if (!character.attacks) character.attacks = [];
+  character.attacks.forEach((a) => {
+    if (a.skillId === undefined) a.skillId = null;
+  });
+  return character;
 }
 
 // XP necessário pra subir de CADA nível (índice 0 = do nível 1 pro 2, etc).
@@ -224,6 +250,57 @@ function doRoll(dice, bonus, label, critRange, critMultiplier) {
     label: label + critNote,
     roll: `${result.notation} → [${result.rolls.join(", ")}] ${result.mod >= 0 ? "+" : ""}${result.mod}`,
     total: finalTotal,
+  };
+  render();
+  setTimeout(() => { toast = null; render(); }, 4500);
+}
+
+// Teste de ataque: rola a perícia escolhida (com o bônus dela), checa crítico
+// nessa rolagem e só então rola o dado de dano — multiplicando o dano se crítico.
+function doAttackTest(attack) {
+  const skill = character.skills.find((s) => s.id === attack.skillId);
+  if (!skill) {
+    toast = { label: "Erro", roll: "Escolha uma perícia para este ataque antes de testar.", total: null };
+    render();
+    setTimeout(() => { toast = null; render(); }, 3000);
+    return;
+  }
+
+  const testRoll = rollDice(skill.dice);
+  if (!testRoll) {
+    toast = { label: "Erro", roll: `Notação inválida na perícia "${skill.name}": "${skill.dice}"`, total: null };
+    render();
+    setTimeout(() => { toast = null; render(); }, 3000);
+    return;
+  }
+  const testTotal = testRoll.total + (skill.bonus || 0);
+
+  const dmgRoll = rollDice(attack.dice);
+  if (!dmgRoll) {
+    toast = { label: "Erro", roll: `Notação de dano inválida: "${attack.dice}"`, total: null };
+    render();
+    setTimeout(() => { toast = null; render(); }, 3000);
+    return;
+  }
+
+  const threshold = parseCritThreshold(attack.critRange);
+  const multiplier = parseFloat(attack.critMultiplier) || 1;
+  const isCrit = threshold !== null && testRoll.rolls.some((r) => r >= threshold);
+
+  let dmgTotal = dmgRoll.total;
+  let critNote = "";
+  if (isCrit && multiplier > 1) {
+    const diceSum = dmgRoll.rolls.reduce((a, b) => a + b, 0);
+    dmgTotal = diceSum * multiplier + dmgRoll.mod;
+    critNote = ` — CRÍTICO ×${multiplier}!`;
+  } else if (isCrit) {
+    critNote = " — CRÍTICO!";
+  }
+
+  toast = {
+    label: `Ataque: ${attack.name}${critNote}`,
+    roll: `Teste (${skill.name}): ${testRoll.notation} → [${testRoll.rolls.join(", ")}] ${testRoll.mod >= 0 ? "+" : ""}${testRoll.mod} = ${testTotal}  |  Dano: ${dmgRoll.notation} → [${dmgRoll.rolls.join(", ")}]`,
+    total: dmgTotal,
   };
   render();
   setTimeout(() => { toast = null; render(); }, 4500);
@@ -626,20 +703,30 @@ function renderItems() {
 }
 
 function renderAttacks() {
+  const attackSkills = character.skills.filter((s) => s.mandatory);
   const rows = character.attacks
-    .map(
-      (a) => `
+    .map((a) => {
+      const options = attackSkills
+        .map((s) => `<option value="${s.id}" ${a.skillId === s.id ? "selected" : ""}>${esc(s.name)}</option>`)
+        .join("");
+      return `
       <div class="attack-row" data-id="${a.id}">
         <input type="text" data-list="attacks" data-id="${a.id}" data-field="name" value="${esc(a.name)}" style="flex:1;font-weight:600;" />
+        <select class="attack-skill-select" data-list="attacks" data-id="${a.id}" data-field="skillId" data-select="true" title="Perícia usada no teste de ataque">${options}</select>
         <input type="text" class="dice" data-list="attacks" data-id="${a.id}" data-field="dice" value="${esc(a.dice)}" title="Dado de dano" />
-        <input type="text" data-list="attacks" data-id="${a.id}" data-field="critRange" value="${esc(a.critRange)}" style="width:56px;text-align:center;" title="Faixa de crítico (ex: 20 ou 19-20)" />
+        <input type="text" data-list="attacks" data-id="${a.id}" data-field="critRange" value="${esc(a.critRange)}" style="width:56px;text-align:center;" title="Faixa de crítico do teste de ataque (ex: 20 ou 19-20)" />
         <input type="text" data-list="attacks" data-id="${a.id}" data-field="critMultiplier" value="${esc(a.critMultiplier || "")}" style="width:44px;text-align:center;" placeholder="×2" title="Multiplicador de dano no crítico" />
-        <button class="dice-btn" data-action="roll-attack" data-id="${a.id}" title="Rolar">${ICONS.dice}</button>
+        <button class="dice-btn" data-action="roll-attack-test" data-id="${a.id}" title="Testar ataque">${ICONS.dice}</button>
         <button class="trash-btn" data-action="remove" data-list="attacks" data-id="${a.id}">${ICONS.trash}</button>
-      </div>`
-    )
+      </div>`;
+    })
     .join("");
-  return `${rows}<button class="btn-add" data-action="add-attack">${ICONS.plus} adicionar ataque</button>`;
+  return `
+    <p class="helper-text" style="margin-bottom:10px;">
+      O teste de ataque usa a perícia escolhida (Luta, Pontaria ou Magia). O dado configurado aqui é o dano,
+      aplicado só se o teste acertar; o crítico (faixa + multiplicador) é checado no <strong>teste</strong> e multiplica o <strong>dano</strong>.
+    </p>
+    ${rows}<button class="btn-add" data-action="add-attack">${ICONS.plus} adicionar ataque</button>`;
 }
 
 function renderTabContent() {
@@ -835,7 +922,7 @@ async function openCharacter(path) {
   try {
     const result = await readJsonFile(path);
     if (!result) throw new Error("Arquivo não encontrado");
-    character = result.data;
+    character = normalizeCharacter(result.data);
     currentSha = result.sha;
     currentPath = path;
     activeTab = "basic";
@@ -954,7 +1041,8 @@ function attachEvents() {
   });
 
   document.querySelectorAll("[data-list]").forEach((input) => {
-    input.addEventListener("input", () => {
+    const eventName = input.dataset.select === "true" ? "change" : "input";
+    input.addEventListener(eventName, () => {
       const list = character[input.dataset.list];
       const item = list.find((x) => x.id === input.dataset.id);
       if (!item) return;
@@ -1046,10 +1134,10 @@ function attachEvents() {
       doRoll(it.attackRoll, 0, `Item: ${it.name}`, it.critRange, it.critMultiplier);
     });
   });
-  document.querySelectorAll("[data-action='roll-attack']").forEach((btn) => {
+  document.querySelectorAll("[data-action='roll-attack-test']").forEach((btn) => {
     btn.addEventListener("click", () => {
       const a = character.attacks.find((x) => x.id === btn.dataset.id);
-      doRoll(a.dice, 0, `Ataque: ${a.name}`, a.critRange, a.critMultiplier);
+      doAttackTest(a);
     });
   });
 }
