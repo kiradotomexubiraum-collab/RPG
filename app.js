@@ -864,8 +864,8 @@ function renderCampaignDashboard() {
             </div>
           </div>
           <div style="display:flex;gap:10px;align-items:center;">
-            <button class="btn-link" data-action="open-linked-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">abrir ficha</button>
-            ${isGm ? `<button class="btn-link danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
+            <button class="btn btn-teal" data-action="open-linked-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">abrir ficha</button>
+            ${isGm ? `<button class="btn danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
           </div>
         </div>
         <div class="char-card-bars">
