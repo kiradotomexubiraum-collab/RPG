@@ -58,4 +58,4 @@ async function validateAndStoreToken(token) {
   localStorage.setItem(AUTH_TOKEN_KEY, token);
   localStorage.setItem(AUTH_USER_KEY, JSON.stringify({ login: user.login, avatar_url: user.avatar_url }));
   return { ok: true, user };
-        }
+}
