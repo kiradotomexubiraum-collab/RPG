@@ -16,11 +16,35 @@ let campaignsLoading = false;
 let campaignsError = "";
 let newCampaignName = "";
 
+// Sub-aba da tela de campanhas: "mine" (as suas) ou "all" (todas, de todo mundo).
+let campaignsSubTab = "mine";
+let allCampaignsList = []; // [{ slug, name, gmUsername, description }]
+let allCampaignsLoading = false;
+let allCampaignsError = "";
+
 let currentCampaignSlug = null;
 let currentCampaign = null;   // { campaign, members, linked, membersSha, linkedSha }
 let campaignDashError = "";
 let linkOwnerInput = "";
 let linkCharIdInput = "";
+let campaignDescSaving = false;
+let campaignDescSaved = false;
+
+// Adição de monstros em massa no painel da campanha (só o mestre vê isso).
+let showBulkMonsterAdd = false;
+let bulkMonsterError = "";
+
+// ---------- Bestiário global (aba "Monstros") ----------
+// Independe de campanha: todos os monstros criados por todos os usuários ficam
+// visíveis a todo mundo, mas só quem criou pode editar ou apagar o próprio monstro.
+let bestiaryList = []; // [{ id, name, level, hp, mp, imageUrl, description, createdBy, createdAt }]
+let bestiarySha = null;
+let bestiaryLoading = false;
+let bestiaryError = "";
+let showNewMonsterForm = false;
+let newMonsterFormError = "";
+let editingMonsterId = null; // id do monstro do bestiário em edição (só o dono pode editar)
+let editMonsterFormError = "";
 
 let activeTab = "basic";
 let toast = null;
@@ -214,9 +238,35 @@ async function loadCampaignsForUser(username) {
   return results.filter(Boolean);
 }
 
+// Lista TODAS as campanhas existentes no repositório, de qualquer usuário —
+// usada na sub-aba "Todas as Campanhas", pra dar pra ver (só ver) campanhas
+// de outras pessoas mesmo sem ser membro delas.
+async function loadAllCampaigns() {
+  const dirs = await listDirectory("campaigns");
+  const slugs = dirs.filter((d) => d.type === "dir").map((d) => d.name);
+
+  const results = await Promise.all(
+    slugs.map(async (slug) => {
+      try {
+        const campaignRes = await readJsonFile(`campaigns/${slug}/campaign.json`);
+        if (!campaignRes) return null;
+        return {
+          slug,
+          name: campaignRes.data.name,
+          gmUsername: campaignRes.data.gmUsername,
+          description: campaignRes.data.description || "",
+        };
+      } catch {
+        return null;
+      }
+    })
+  );
+  return results.filter(Boolean);
+}
+
 async function createCampaign(name, gmUsername) {
   const slug = slugify(name) + "-" + uid();
-  const campaign = { name, gmUsername, createdAt: new Date().toISOString() };
+  const campaign = { name, gmUsername, description: "", createdAt: new Date().toISOString() };
   const members = [{ username: gmUsername, role: "gm" }];
   const linked = [];
   const monsters = [];
@@ -268,6 +318,7 @@ async function loadCampaignDashboard(slug) {
   const linkedHydrated = await hydrateLinkedCharacters(linkedRes.data);
   return {
     campaign: campaignRes.data,
+    campaignSha: campaignRes.sha,
     members: membersRes.data,
     membersSha: membersRes.sha,
     linked: linkedRes.data,
@@ -276,6 +327,18 @@ async function loadCampaignDashboard(slug) {
     monsters: monstersRes ? monstersRes.data : [],
     monstersSha: monstersRes ? monstersRes.sha : null,
   };
+}
+
+// Salva a descrição da campanha. Só o mestre edita (a interface já esconde o
+// campo de edição de quem não é mestre), mas a checagem de sha continua
+// protegendo contra sobrescrever uma edição concorrente.
+async function saveCampaignDescription(slug, description, knownSha) {
+  const res = await readJsonFile(`campaigns/${slug}/campaign.json`);
+  const sha = res ? res.sha : knownSha;
+  const campaign = res ? res.data : {};
+  campaign.description = description;
+  const newSha = await writeJsonFile(`campaigns/${slug}/campaign.json`, campaign, sha, `chore: atualiza descrição da campanha`);
+  return newSha;
 }
 
 // Junta o histórico de rolagens de todos os personagens vinculados à
@@ -315,6 +378,83 @@ async function removeMonster(slug, monsterId) {
   if (!res) return;
   const updated = res.data.filter((m) => m.id !== monsterId);
   await writeJsonFile(`campaigns/${slug}/monsters.json`, updated, res.sha, `chore: remove monstro`);
+}
+
+// Cria vários monstros de uma vez (só o mestre usa isso), num único commit.
+async function addMonstersBulk(slug, monsters) {
+  const res = await readJsonFile(`campaigns/${slug}/monsters.json`);
+  const list = res ? res.data : [];
+  const sha = res ? res.sha : null;
+  const updated = [...list, ...monsters.map((m) => ({ id: uid(), ...m }))];
+  await writeJsonFile(`campaigns/${slug}/monsters.json`, updated, sha, `feat: adiciona ${monsters.length} monstro(s) em massa`);
+}
+
+// Parseia o texto colado no campo de adição em massa. Uma linha por monstro,
+// campos separados por vírgula: Nome, Nível, HP, MP (nível/HP/MP são opcionais).
+function parseBulkMonsterText(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(",").map((p) => p.trim());
+      const [name, level, hp, mp] = parts;
+      return {
+        name: name || "Monstro sem nome",
+        level: level && !isNaN(Number(level)) ? Number(level) : 1,
+        hp: hp && !isNaN(Number(hp)) ? Number(hp) : 0,
+        mp: mp && !isNaN(Number(mp)) ? Number(mp) : 0,
+      };
+    });
+}
+
+// ---------- Bestiário global (independente de campanha) ----------
+// Fica salvo em bestiary/monsters.json, um único arquivo compartilhado por
+// todo mundo: qualquer pessoa vê todos os monstros, mas só quem criou (campo
+// createdBy) pode editar ou apagar o próprio monstro.
+async function loadBestiary() {
+  const res = await readJsonFile("bestiary/monsters.json");
+  return { data: res ? res.data : [], sha: res ? res.sha : null };
+}
+
+async function createBestiaryMonster(monster, ownerUsername) {
+  const res = await readJsonFile("bestiary/monsters.json");
+  const list = res ? res.data : [];
+  const sha = res ? res.sha : null;
+  const entry = {
+    id: uid(),
+    name: monster.name,
+    level: monster.level,
+    hp: monster.hp,
+    mp: monster.mp,
+    imageUrl: monster.imageUrl || "",
+    description: monster.description || "",
+    createdBy: ownerUsername,
+    createdAt: new Date().toISOString(),
+  };
+  const updated = [...list, entry];
+  await writeJsonFile("bestiary/monsters.json", updated, sha, `feat: adiciona monstro "${monster.name}" ao bestiário`);
+  return entry;
+}
+
+async function updateBestiaryMonster(monsterId, updates, ownerUsername) {
+  const res = await readJsonFile("bestiary/monsters.json");
+  if (!res) throw new Error("Bestiário vazio.");
+  const monster = res.data.find((m) => m.id === monsterId);
+  if (!monster) throw new Error("Monstro não encontrado.");
+  if (monster.createdBy !== ownerUsername) throw new Error("Só quem criou este monstro pode editá-lo.");
+  Object.assign(monster, updates);
+  await writeJsonFile("bestiary/monsters.json", res.data, res.sha, `chore: edita monstro "${monster.name}" do bestiário`);
+}
+
+async function deleteBestiaryMonster(monsterId, ownerUsername) {
+  const res = await readJsonFile("bestiary/monsters.json");
+  if (!res) return;
+  const monster = res.data.find((m) => m.id === monsterId);
+  if (!monster) return;
+  if (monster.createdBy !== ownerUsername) throw new Error("Só quem criou este monstro pode apagá-lo.");
+  const updated = res.data.filter((m) => m.id !== monsterId);
+  await writeJsonFile("bestiary/monsters.json", updated, res.sha, `chore: remove monstro do bestiário`);
 }
 
 async function linkCharacterToCampaign(slug, ownerUsername, characterId) {
@@ -582,7 +722,8 @@ function renderNavTabs(active) {
   return `
     <div class="nav-tabs">
       <button class="nav-tab ${active === "characters" ? "active" : ""}" data-action="nav-characters">Meus Personagens</button>
-      <button class="nav-tab ${active === "campaigns" ? "active" : ""}" data-action="nav-campaigns">Minhas Campanhas</button>
+      <button class="nav-tab ${active === "campaigns" ? "active" : ""}" data-action="nav-campaigns">Campanhas</button>
+      <button class="nav-tab ${active === "monsters" ? "active" : ""}" data-action="nav-monsters">Monstros</button>
     </div>`;
 }
 
@@ -622,7 +763,7 @@ function renderList() {
 
 function renderCampaigns() {
   const user = getStoredUser();
-  const items = campaignList
+  const mineItems = campaignList
     .map(
       (c) => `
       <div class="char-list-item">
@@ -634,18 +775,50 @@ function renderCampaigns() {
     )
     .join("");
 
+  const allItems = allCampaignsList
+    .map(
+      (c) => `
+      <div class="char-list-item">
+        <button class="char-list-open" data-action="open-campaign" data-slug="${esc(c.slug)}">
+          <span>
+            ${esc(c.name)} <span class="role-tag">mestre: ${esc(c.gmUsername)}</span>
+            ${c.description ? `<div class="campaign-preview-desc">${esc(c.description)}</div>` : ""}
+          </span>
+          <span class="char-list-arrow">→</span>
+        </button>
+      </div>`
+    )
+    .join("");
+
+  const isMine = campaignsSubTab === "mine";
+
   return `
     <div class="center-box">
       <div class="login-card" style="max-width:480px;">
         <div class="eyebrow">Conectado como ${esc(user?.login || "")}</div>
         ${renderNavTabs("campaigns")}
-        <h1 class="char-name" style="margin-bottom:1rem;">Minhas Campanhas</h1>
-        ${campaignsError ? `<p class="login-error">${esc(campaignsError)}</p>` : ""}
-        ${campaignsLoading ? `<p class="helper-text">Carregando...</p>` : items || `<p class="helper-text">Nenhuma campanha ainda.</p>`}
-        <div style="margin-top:14px;display:flex;gap:8px;">
-          <input type="text" id="new-campaign-name" placeholder="Nome da nova campanha" value="${esc(newCampaignName)}" />
-          <button class="btn btn-stamp" data-action="create-campaign">Criar</button>
+        <h1 class="char-name" style="margin-bottom:1rem;">Campanhas</h1>
+
+        <div class="sub-tabs">
+          <button class="sub-tab ${isMine ? "active" : ""}" data-action="campaigns-subtab-mine">Minhas Campanhas</button>
+          <button class="sub-tab ${!isMine ? "active" : ""}" data-action="campaigns-subtab-all">Todas as Campanhas</button>
         </div>
+
+        ${
+          isMine
+            ? `
+          ${campaignsError ? `<p class="login-error">${esc(campaignsError)}</p>` : ""}
+          ${campaignsLoading ? `<p class="helper-text">Carregando...</p>` : mineItems || `<p class="helper-text">Nenhuma campanha ainda.</p>`}
+          <div style="margin-top:14px;display:flex;gap:8px;">
+            <input type="text" id="new-campaign-name" placeholder="Nome da nova campanha" value="${esc(newCampaignName)}" />
+            <button class="btn btn-stamp" data-action="create-campaign">Criar</button>
+          </div>`
+            : `
+          <p class="helper-text" style="margin-bottom:10px;">Todas as campanhas do repositório, de qualquer mestre — dá pra abrir e ver, mas só o mestre e os donos dos personagens vinculados podem editar.</p>
+          ${allCampaignsError ? `<p class="login-error">${esc(allCampaignsError)}</p>` : ""}
+          ${allCampaignsLoading ? `<p class="helper-text">Carregando...</p>` : allItems || `<p class="helper-text">Nenhuma campanha encontrada.</p>`}`
+        }
+
         <button class="btn btn-teal" data-action="logout" style="margin-top:14px;display:block;">Sair</button>
       </div>
     </div>`;
@@ -720,23 +893,45 @@ function renderCampaignDashboard() {
   const monsterItems = (cd.monsters || [])
     .map(
       (m) => `
-      <li class="monster-item">
-        <span class="monster-name">${esc(m.name)}</span>
-        <span class="monster-stats">Nv. ${esc(String(m.level))} · <span class="hp-value">HP ${esc(String(m.hp))}</span> · MP ${esc(String(m.mp))}</span>
+      <li class="monster-item ${m.imageUrl || m.description ? "monster-item-rich" : ""}">
+        ${m.imageUrl ? `<div class="monster-thumb"><img src="${esc(m.imageUrl)}" alt=""></div>` : ""}
+        <div class="monster-item-body">
+          <div class="monster-item-top">
+            <span class="monster-name">${esc(m.name)}</span>
+            <span class="monster-stats">Nv. ${esc(String(m.level))} · <span class="hp-value">HP ${esc(String(m.hp))}</span> · MP ${esc(String(m.mp))}</span>
+          </div>
+          ${m.description ? `<p class="monster-desc">${esc(m.description)}</p>` : ""}
+        </div>
         ${isGm ? `<button class="btn-link danger" data-action="remove-monster" data-id="${esc(m.id)}">remover</button>` : ""}
       </li>`
     )
     .join("");
 
+  const description = cd.campaign.description || "";
+
   return `
     <div class="center-box">
       <div class="login-card" style="max-width:640px;">
-        <button class="btn-back" data-action="back-to-campaigns" style="margin-bottom:10px;display:block;">← minhas campanhas</button>
+        <button class="btn-back" data-action="back-to-campaigns" style="margin-bottom:10px;display:block;">← campanhas</button>
         <div class="eyebrow">Painel da Campanha</div>
         <h1 class="char-name" style="margin-bottom:1rem;">${esc(cd.campaign.name)}</h1>
         ${campaignDashError ? `<p class="login-error">${esc(campaignDashError)}</p>` : ""}
 
-        <button class="btn btn-teal" data-action="toggle-campaign-history" style="margin-bottom:10px;display:block;">histórico de rolagens da campanha</button>
+        <h2 class="section-title">Descrição</h2>
+        ${
+          isGm
+            ? `
+        <textarea rows="4" id="campaign-desc-input" class="campaign-desc-textarea" placeholder="Conte do que se trata a campanha, tom, ambientação, avisos aos jogadores...">${esc(description)}</textarea>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px;">
+          <button class="btn btn-teal" data-action="save-campaign-description" ${campaignDescSaving ? "disabled" : ""}>${campaignDescSaving ? "Salvando..." : "Salvar descrição"}</button>
+          ${campaignDescSaved ? `<span class="confirm-msg" style="margin:0;">✓ Salvo</span>` : ""}
+        </div>`
+            : description
+              ? `<p class="campaign-desc-view">${esc(description)}</p>`
+              : `<p class="helper-text">O mestre ainda não escreveu uma descrição.</p>`
+        }
+
+        <button class="btn btn-teal" data-action="toggle-campaign-history" style="margin:14px 0 10px;display:block;">histórico de rolagens da campanha</button>
 
         <h2 class="section-title">Personagens Vinculados</h2>
         <ul class="linked-list">${linkedItems || `<li class="helper-text">Nenhum personagem vinculado ainda.</li>`}</ul>
@@ -760,7 +955,7 @@ function renderCampaignDashboard() {
         ${
           isGm
             ? `
-        <p class="helper-text" style="margin:8px 0;">Só informações essenciais: nome, nível, HP e MP.</p>
+        <p class="helper-text" style="margin:8px 0;">Só o mestre pode adicionar monstros à campanha.</p>
         ${monsterFormError ? `<p class="login-error">${esc(monsterFormError)}</p>` : ""}
         <div class="monster-form">
           <input type="text" id="monster-name-input" placeholder="Nome" />
@@ -768,7 +963,22 @@ function renderCampaignDashboard() {
           <input type="number" id="monster-hp-input" placeholder="HP" style="width:80px;" />
           <input type="number" id="monster-mp-input" placeholder="MP" style="width:80px;" />
           <button class="btn btn-teal" data-action="do-add-monster">+ criar monstro</button>
+        </div>
+        <button class="btn-add" data-action="toggle-bulk-monster-add" style="margin-top:8px;">${ICONS.plus} adicionar em massa</button>
+        ${
+          showBulkMonsterAdd
+            ? `
+        <div class="bulk-monster-box">
+          <p class="helper-text" style="margin-bottom:6px;">Um monstro por linha: <code>Nome, Nível, HP, MP</code> (nível/HP/MP são opcionais).</p>
+          ${bulkMonsterError ? `<p class="login-error">${esc(bulkMonsterError)}</p>` : ""}
+          <textarea rows="5" id="bulk-monster-textarea" placeholder="Cultista, 2, 15, 5
+Sombra Rastejante, 4, 30, 10
+Aberração Menor"></textarea>
+          <button class="btn btn-stamp" data-action="do-add-monsters-bulk" style="margin-top:6px;">criar todos</button>
         </div>`
+            : ""
+        }
+        `
             : ""
         }
 
@@ -814,6 +1024,108 @@ function renderCampaignHistoryPanel() {
           <button class="btn btn-teal" data-action="toggle-campaign-history">fechar ✕</button>
         </div>
         <div class="history-list">${body}</div>
+      </div>
+    </div>`;
+}
+
+// ---------- Bestiário global (aba "Monstros") ----------
+function renderBestiary() {
+  const user = getStoredUser();
+
+  const cards = bestiaryList
+    .map((m) => {
+      const isOwner = user && m.createdBy === user.login;
+      if (editingMonsterId === m.id) {
+        return `
+        <div class="monster-card monster-card-editing" data-id="${esc(m.id)}">
+          <div class="monster-card-form">
+            <input type="text" id="edit-monster-name-${m.id}" placeholder="Nome" value="${esc(m.name)}" />
+            <div class="grid-3">
+              <input type="number" id="edit-monster-level-${m.id}" placeholder="Nível" value="${esc(String(m.level ?? 1))}" />
+              <input type="number" id="edit-monster-hp-${m.id}" placeholder="HP" value="${esc(String(m.hp ?? 0))}" />
+              <input type="number" id="edit-monster-mp-${m.id}" placeholder="MP" value="${esc(String(m.mp ?? 0))}" />
+            </div>
+            <input type="text" id="edit-monster-image-${m.id}" placeholder="URL da imagem (opcional)" value="${esc(m.imageUrl || "")}" />
+            <textarea rows="3" id="edit-monster-desc-${m.id}" placeholder="Descrição...">${esc(m.description || "")}</textarea>
+            ${editMonsterFormError ? `<p class="login-error">${esc(editMonsterFormError)}</p>` : ""}
+            <div style="display:flex;gap:8px;margin-top:6px;">
+              <button class="btn btn-teal" data-action="do-save-monster-edit" data-id="${esc(m.id)}">salvar</button>
+              <button class="btn-back" data-action="cancel-monster-edit">cancelar</button>
+            </div>
+          </div>
+        </div>`;
+      }
+      return `
+      <div class="monster-card" data-id="${esc(m.id)}">
+        <div class="monster-card-image">
+          ${m.imageUrl ? `<img src="${esc(m.imageUrl)}" alt="">` : `<span class="monster-card-placeholder">${ICONS.swords}</span>`}
+        </div>
+        <div class="monster-card-body">
+          <div class="monster-card-top">
+            <span class="monster-card-name">${esc(m.name)}</span>
+            <span class="monster-card-stats">Nv. ${esc(String(m.level ?? 1))}</span>
+          </div>
+          <div class="monster-card-bars-mini">
+            <span class="hp-value">HP ${esc(String(m.hp ?? 0))}</span>
+            <span>MP ${esc(String(m.mp ?? 0))}</span>
+          </div>
+          ${m.description ? `<p class="monster-card-desc">${esc(m.description)}</p>` : `<p class="monster-card-desc helper-text">Sem descrição.</p>`}
+          <div class="monster-card-footer">
+            <span class="monster-card-owner">criado por ${esc(m.createdBy || "?")}</span>
+            ${
+              isOwner
+                ? `
+              <span class="monster-card-owner-actions">
+                <button class="btn-link" data-action="edit-monster" data-id="${esc(m.id)}">editar</button>
+                <button class="btn-link danger" data-action="do-delete-monster" data-id="${esc(m.id)}">apagar</button>
+              </span>`
+                : ""
+            }
+          </div>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  return `
+    <div class="center-box">
+      <div class="login-card" style="max-width:720px;">
+        <div class="eyebrow">Conectado como ${esc(user?.login || "")}</div>
+        ${renderNavTabs("monsters")}
+        <h1 class="char-name" style="margin-bottom:0.4rem;">Bestiário</h1>
+        <p class="helper-text" style="margin-bottom:14px;">
+          Monstros criados por qualquer pessoa aparecem aqui pra todo mundo ver. Só quem criou um monstro pode
+          editá-lo ou apagá-lo. Isso é separado dos monstros de cada campanha.
+        </p>
+        ${bestiaryError ? `<p class="login-error">${esc(bestiaryError)}</p>` : ""}
+
+        ${!showNewMonsterForm ? `<button class="btn btn-teal" data-action="toggle-new-monster-form">+ Novo Monstro</button>` : ""}
+        ${
+          showNewMonsterForm
+            ? `
+        <div class="monster-card-form new-monster-form">
+          <input type="text" id="new-monster-name" placeholder="Nome" />
+          <div class="grid-3">
+            <input type="number" id="new-monster-level" placeholder="Nível" />
+            <input type="number" id="new-monster-hp" placeholder="HP" />
+            <input type="number" id="new-monster-mp" placeholder="MP" />
+          </div>
+          <input type="text" id="new-monster-image" placeholder="URL da imagem (opcional)" />
+          <textarea rows="3" id="new-monster-desc" placeholder="Descrição (aparência, comportamento, fraquezas...)"></textarea>
+          ${newMonsterFormError ? `<p class="login-error">${esc(newMonsterFormError)}</p>` : ""}
+          <div style="display:flex;gap:8px;margin-top:6px;">
+            <button class="btn btn-stamp" data-action="do-create-monster">criar monstro</button>
+            <button class="btn-back" data-action="toggle-new-monster-form">cancelar</button>
+          </div>
+        </div>`
+            : ""
+        }
+
+        <div class="bestiary-grid" style="margin-top:16px;">
+          ${bestiaryLoading ? `<p class="helper-text">Carregando...</p>` : cards || `<p class="helper-text">Nenhum monstro cadastrado ainda.</p>`}
+        </div>
+
+        <button class="btn btn-teal" data-action="logout" style="margin-top:18px;display:block;">Sair</button>
       </div>
     </div>`;
 }
@@ -1149,6 +1461,7 @@ function render() {
   else if (screen === "list") html = renderList();
   else if (screen === "campaigns") html = renderCampaigns();
   else if (screen === "campaign-dashboard") html = renderCampaignDashboard();
+  else if (screen === "bestiary") html = renderBestiary();
   else if (screen === "sheet") html = renderSheet();
 
   app.innerHTML =
@@ -1188,6 +1501,7 @@ async function goToList() {
 
 async function goToCampaigns() {
   screen = "campaigns";
+  campaignsSubTab = "mine";
   campaignsError = "";
   campaignsLoading = true;
   render();
@@ -1198,6 +1512,42 @@ async function goToCampaigns() {
     campaignsError = "Não foi possível carregar campanhas: " + (err.message || err);
   }
   campaignsLoading = false;
+  render();
+}
+
+async function goToCampaignsSubTab(tab) {
+  campaignsSubTab = tab;
+  if (tab === "all" && allCampaignsList.length === 0 && !allCampaignsLoading) {
+    allCampaignsLoading = true;
+    allCampaignsError = "";
+    render();
+    try {
+      allCampaignsList = await loadAllCampaigns();
+    } catch (err) {
+      allCampaignsError = "Não foi possível carregar todas as campanhas: " + (err.message || err);
+    }
+    allCampaignsLoading = false;
+  }
+  render();
+}
+
+async function goToBestiary() {
+  screen = "bestiary";
+  bestiaryError = "";
+  bestiaryLoading = true;
+  showNewMonsterForm = false;
+  newMonsterFormError = "";
+  editingMonsterId = null;
+  editMonsterFormError = "";
+  render();
+  try {
+    const res = await loadBestiary();
+    bestiaryList = res.data;
+    bestiarySha = res.sha;
+  } catch (err) {
+    bestiaryError = "Não foi possível carregar o bestiário: " + (err.message || err);
+  }
+  bestiaryLoading = false;
   render();
 }
 
@@ -1224,6 +1574,10 @@ async function openCampaignDashboardScreen(slug) {
   showCampaignHistory = false;
   campaignHistoryEntries = [];
   monsterFormError = "";
+  showBulkMonsterAdd = false;
+  bulkMonsterError = "";
+  campaignDescSaving = false;
+  campaignDescSaved = false;
   render();
   try {
     currentCampaign = await loadCampaignDashboard(slug);
@@ -1365,6 +1719,16 @@ function attachEvents() {
   });
   document.querySelectorAll("[data-action='nav-campaigns']").forEach((btn) => {
     btn.addEventListener("click", goToCampaigns);
+  });
+  document.querySelectorAll("[data-action='nav-monsters']").forEach((btn) => {
+    btn.addEventListener("click", goToBestiary);
+  });
+
+  document.querySelectorAll("[data-action='campaigns-subtab-mine']").forEach((btn) => {
+    btn.addEventListener("click", () => goToCampaignsSubTab("mine"));
+  });
+  document.querySelectorAll("[data-action='campaigns-subtab-all']").forEach((btn) => {
+    btn.addEventListener("click", () => goToCampaignsSubTab("all"));
   });
 
   document.querySelectorAll("[data-action='create-campaign']").forEach((btn) => {
@@ -1565,6 +1929,172 @@ function attachEvents() {
       if (idx >= 0 && idx < levels.length - 1) s.training = levels[idx + 1];
       render();
       scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='save-campaign-description']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const input = document.getElementById("campaign-desc-input");
+      const description = input ? input.value : "";
+      campaignDescSaving = true;
+      campaignDescSaved = false;
+      render();
+      try {
+        await saveCampaignDescription(currentCampaignSlug, description, currentCampaign?.campaignSha);
+        currentCampaign = await loadCampaignDashboard(currentCampaignSlug);
+        campaignDescSaved = true;
+        campaignDashError = "";
+      } catch (err) {
+        campaignDashError = "Falha ao salvar descrição: " + (err.message || err);
+      }
+      campaignDescSaving = false;
+      render();
+      setTimeout(() => { campaignDescSaved = false; render(); }, 2500);
+    });
+  });
+
+  document.querySelectorAll("[data-action='toggle-bulk-monster-add']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      showBulkMonsterAdd = !showBulkMonsterAdd;
+      bulkMonsterError = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='do-add-monsters-bulk']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const textarea = document.getElementById("bulk-monster-textarea");
+      const text = textarea ? textarea.value : "";
+      const monsters = parseBulkMonsterText(text);
+      if (monsters.length === 0) {
+        bulkMonsterError = "Escreva pelo menos um monstro, um por linha.";
+        render();
+        return;
+      }
+      try {
+        await addMonstersBulk(currentCampaignSlug, monsters);
+        bulkMonsterError = "";
+        showBulkMonsterAdd = false;
+        currentCampaign = await loadCampaignDashboard(currentCampaignSlug);
+      } catch (err) {
+        bulkMonsterError = "Falha ao criar monstros: " + (err.message || err);
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='toggle-new-monster-form']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      showNewMonsterForm = !showNewMonsterForm;
+      newMonsterFormError = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='do-create-monster']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const user = getStoredUser();
+      const nameEl = document.getElementById("new-monster-name");
+      const levelEl = document.getElementById("new-monster-level");
+      const hpEl = document.getElementById("new-monster-hp");
+      const mpEl = document.getElementById("new-monster-mp");
+      const imageEl = document.getElementById("new-monster-image");
+      const descEl = document.getElementById("new-monster-desc");
+      const name = nameEl ? nameEl.value.trim() : "";
+      if (!name) {
+        newMonsterFormError = "Dê um nome ao monstro.";
+        render();
+        return;
+      }
+      const monster = {
+        name,
+        level: levelEl && levelEl.value ? Number(levelEl.value) : 1,
+        hp: hpEl && hpEl.value ? Number(hpEl.value) : 0,
+        mp: mpEl && mpEl.value ? Number(mpEl.value) : 0,
+        imageUrl: imageEl ? imageEl.value.trim() : "",
+        description: descEl ? descEl.value.trim() : "",
+      };
+      try {
+        await createBestiaryMonster(monster, user.login);
+        newMonsterFormError = "";
+        showNewMonsterForm = false;
+        const res = await loadBestiary();
+        bestiaryList = res.data;
+        bestiarySha = res.sha;
+      } catch (err) {
+        newMonsterFormError = "Falha ao criar monstro: " + (err.message || err);
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='edit-monster']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      editingMonsterId = btn.dataset.id;
+      editMonsterFormError = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='cancel-monster-edit']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      editingMonsterId = null;
+      editMonsterFormError = "";
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='do-save-monster-edit']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const user = getStoredUser();
+      const id = btn.dataset.id;
+      const nameEl = document.getElementById(`edit-monster-name-${id}`);
+      const levelEl = document.getElementById(`edit-monster-level-${id}`);
+      const hpEl = document.getElementById(`edit-monster-hp-${id}`);
+      const mpEl = document.getElementById(`edit-monster-mp-${id}`);
+      const imageEl = document.getElementById(`edit-monster-image-${id}`);
+      const descEl = document.getElementById(`edit-monster-desc-${id}`);
+      const name = nameEl ? nameEl.value.trim() : "";
+      if (!name) {
+        editMonsterFormError = "Dê um nome ao monstro.";
+        render();
+        return;
+      }
+      const updates = {
+        name,
+        level: levelEl && levelEl.value ? Number(levelEl.value) : 1,
+        hp: hpEl && hpEl.value ? Number(hpEl.value) : 0,
+        mp: mpEl && mpEl.value ? Number(mpEl.value) : 0,
+        imageUrl: imageEl ? imageEl.value.trim() : "",
+        description: descEl ? descEl.value.trim() : "",
+      };
+      try {
+        await updateBestiaryMonster(id, updates, user.login);
+        editingMonsterId = null;
+        editMonsterFormError = "";
+        const res = await loadBestiary();
+        bestiaryList = res.data;
+        bestiarySha = res.sha;
+      } catch (err) {
+        editMonsterFormError = "Falha ao salvar: " + (err.message || err);
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='do-delete-monster']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const user = getStoredUser();
+      if (!confirm("Apagar este monstro do bestiário? Isso não afeta cópias já adicionadas em campanhas.")) return;
+      try {
+        await deleteBestiaryMonster(btn.dataset.id, user.login);
+        const res = await loadBestiary();
+        bestiaryList = res.data;
+        bestiarySha = res.sha;
+      } catch (err) {
+        bestiaryError = "Falha ao apagar monstro: " + (err.message || err);
+      }
+      render();
     });
   });
 
