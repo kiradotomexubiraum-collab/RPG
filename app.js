@@ -64,6 +64,20 @@ let campaignHistoryEntries = [];
 
 let monsterFormError = "";
 
+// ---------- Livro do sistema (arquivo único, upload livre por enquanto) ----------
+let systemBookMeta = null;
+let systemBookMetaSha = null;
+let systemBookLoading = false;
+let systemBookUploading = false;
+let systemBookError = "";
+
+function formatFileSize(bytes) {
+  if (bytes === undefined || bytes === null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function uid() {
   return Math.random().toString(36).slice(2, 8);
 }
@@ -87,10 +101,10 @@ function colorForCharacter(owner, characterId) {
 // usada pra testes de ataque mágico). Luta, Pontaria e Magia são as únicas usadas nos
 // testes de ataque e por isso não podem ser removidas da ficha.
 const OFFICIAL_SKILLS = [
-  "Acrobacia", "Adestramento", "Artes", "Atletismo", "Atualidades", "Ciências", "Crime",
+  "Adestramento", "Atletismo", "Ciências", "Crime",
   "Diplomacia", "Enganação", "Fortitude", "Furtividade", "Iniciativa", "Intimidação",
-  "Intuição", "Investigação", "Luta", "Medicina", "Ocultismo", "Percepção", "Pilotagem",
-  "Pontaria", "Profissão", "Reflexos", "Religião", "Sobrevivência", "Tática", "Tecnologia",
+  "Intuição", "Investigação", "Luta", "Medicina", "Percepção", "Pilotagem",
+  "Pontaria", "Reflexos", "Sobrevivência", "Tecnologia",
   "Vontade", "Magia",
 ];
 const MANDATORY_SKILLS = ["Luta", "Pontaria", "Magia"];
@@ -768,6 +782,7 @@ function renderNavTabs(active) {
       <button class="nav-tab ${active === "characters" ? "active" : ""}" data-action="nav-characters">Meus Personagens</button>
       <button class="nav-tab ${active === "campaigns" ? "active" : ""}" data-action="nav-campaigns">Campanhas</button>
       <button class="nav-tab ${active === "monsters" ? "active" : ""}" data-action="nav-monsters">Monstros</button>
+      <button class="nav-tab ${active === "system" ? "active" : ""}" data-action="nav-system">Livro do Sistema</button>
     </div>`;
 }
 
@@ -1176,6 +1191,53 @@ function renderBestiary() {
     </div>`;
 }
 
+// ---------- Livro do sistema (aba "Livro do Sistema") ----------
+// Por enquanto só guarda o arquivo em si (PDF, imagem etc.); o conteúdo/uso
+// dentro da ficha (referências, busca etc.) fica pra depois.
+function renderSystemBook() {
+  const user = getStoredUser();
+  const b = systemBookMeta;
+
+  return `
+    <div class="center-box">
+      <div class="login-card" style="max-width:560px;">
+        <div class="eyebrow">Conectado como ${esc(user?.login || "")}</div>
+        ${renderNavTabs("system")}
+        <h1 class="char-name" style="margin-bottom:0.4rem;">Livro do Sistema</h1>
+        <p class="helper-text" style="margin-bottom:14px;">
+          Suba aqui o arquivo do manual/livro de regras do sistema (PDF, imagem etc.) pra ficar
+          disponível pra todo mundo que usa esta ficha. Existe só um arquivo atual — enviar um novo
+          substitui o anterior. O conteúdo em si (texto pesquisável, referências dentro da ficha etc.)
+          é uma etapa futura; por enquanto isso só guarda e disponibiliza o arquivo.
+        </p>
+        ${systemBookError ? `<p class="login-error">${esc(systemBookError)}</p>` : ""}
+
+        ${
+          systemBookLoading
+            ? `<p class="helper-text">Carregando...</p>`
+            : b
+            ? `
+          <div class="monster-item">
+            <span class="monster-name">${esc(b.fileName)}</span>
+            <span class="monster-stats">${esc(formatFileSize(b.sizeBytes))} · enviado por ${esc(b.uploadedBy)} em ${esc(new Date(b.uploadedAt).toLocaleDateString("pt-BR"))}</span>
+          </div>
+          <div style="display:flex;gap:16px;align-items:center;margin:14px 0;">
+            <button class="btn btn-teal" data-action="system-book-download">baixar arquivo</button>
+            <button class="btn-link danger" data-action="system-book-remove">remover</button>
+          </div>`
+            : `<p class="helper-text" style="margin-bottom:14px;">Nenhum arquivo enviado ainda.</p>`
+        }
+
+        <label class="btn btn-teal" style="display:inline-block;cursor:pointer;">
+          ${systemBookUploading ? "enviando..." : b ? "substituir arquivo" : "+ enviar arquivo"}
+          <input type="file" data-action="system-book-upload" hidden ${systemBookUploading ? "disabled" : ""} />
+        </label>
+
+        <button class="btn btn-teal" data-action="logout" style="margin-top:18px;display:block;">Sair</button>
+      </div>
+    </div>`;
+}
+
 // ---------- Conteúdo das abas (idêntico ao protótipo anterior) ----------
 function renderBasic() {
   const b = character.basic;
@@ -1525,6 +1587,7 @@ function render() {
   else if (screen === "campaigns") html = renderCampaigns();
   else if (screen === "campaign-dashboard") html = renderCampaignDashboard();
   else if (screen === "bestiary") html = renderBestiary();
+  else if (screen === "system") html = renderSystemBook();
   else if (screen === "sheet") html = renderSheet();
 
   app.innerHTML =
@@ -1611,6 +1674,22 @@ async function goToBestiary() {
     bestiaryError = "Não foi possível carregar o bestiário: " + (err.message || err);
   }
   bestiaryLoading = false;
+  render();
+}
+
+async function goToSystemBook() {
+  screen = "system";
+  systemBookError = "";
+  systemBookLoading = true;
+  render();
+  try {
+    const res = await readJsonFile("system/rulebook_meta.json");
+    systemBookMeta = res ? res.data : null;
+    systemBookMetaSha = res ? res.sha : null;
+  } catch (err) {
+    systemBookError = "Não foi possível carregar o livro do sistema: " + (err.message || err);
+  }
+  systemBookLoading = false;
   render();
 }
 
@@ -1785,6 +1864,102 @@ function attachEvents() {
   });
   document.querySelectorAll("[data-action='nav-monsters']").forEach((btn) => {
     btn.addEventListener("click", goToBestiary);
+  });
+
+  document.querySelectorAll("[data-action='nav-system']").forEach((btn) => {
+    btn.addEventListener("click", goToSystemBook);
+  });
+
+  document.querySelectorAll("[data-action='system-book-upload']").forEach((input) => {
+    input.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      systemBookUploading = true;
+      systemBookError = "";
+      render();
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
+          reader.readAsDataURL(file);
+        });
+        const base64 = dataUrl.split(",")[1];
+        const user = getStoredUser();
+        const existingDataSha = systemBookMeta ? systemBookMeta.dataSha : null;
+        const dataSha = await writeRawFile(
+          "system/rulebook_data",
+          base64,
+          existingDataSha,
+          `feat: atualiza o livro do sistema (${file.name})`
+        );
+        const meta = {
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: user.login,
+          dataSha,
+        };
+        await writeJsonFile(
+          "system/rulebook_meta.json",
+          meta,
+          systemBookMetaSha,
+          `feat: atualiza metadados do livro do sistema (${file.name})`
+        );
+        systemBookMeta = meta;
+        const fresh = await readJsonFile("system/rulebook_meta.json");
+        if (fresh) systemBookMetaSha = fresh.sha;
+      } catch (err) {
+        systemBookError = "Falha ao enviar arquivo: " + (err.message || err);
+      }
+      systemBookUploading = false;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='system-book-download']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        const raw = await readRawFile("system/rulebook_data");
+        if (!raw) return;
+        const byteChars = atob(raw.base64);
+        const byteNumbers = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: (systemBookMeta && systemBookMeta.mimeType) || "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = (systemBookMeta && systemBookMeta.fileName) || "livro-do-sistema";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        systemBookError = "Falha ao baixar arquivo: " + (err.message || err);
+        render();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-action='system-book-remove']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Remover o arquivo atual do livro do sistema?")) return;
+      try {
+        if (systemBookMeta && systemBookMeta.dataSha) {
+          await deleteFile("system/rulebook_data", systemBookMeta.dataSha, "chore: remove o livro do sistema");
+        }
+        if (systemBookMetaSha) {
+          await deleteFile("system/rulebook_meta.json", systemBookMetaSha, "chore: remove metadados do livro do sistema");
+        }
+        systemBookMeta = null;
+        systemBookMetaSha = null;
+      } catch (err) {
+        systemBookError = "Falha ao remover: " + (err.message || err);
+      }
+      render();
+    });
   });
 
   document.querySelectorAll("[data-action='campaigns-subtab-mine']").forEach((btn) => {
