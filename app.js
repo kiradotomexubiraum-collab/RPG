@@ -109,6 +109,19 @@ const OFFICIAL_SKILLS = [
 ];
 const MANDATORY_SKILLS = ["Luta", "Pontaria", "Magia"];
 
+// Tipos de item: define se ele sincroniza com a área de Ataques.
+const ITEM_TYPES = [
+  { value: "equipavel", label: "Equipável" },
+  { value: "arma", label: "Arma" },
+  { value: "utilizavel", label: "Utilizável" },
+];
+
+// Tipos de campo livre que um item pode ter.
+const ITEM_FIELD_KINDS = [
+  { value: "text", label: "Campo livre (texto)" },
+  { value: "skillBuff", label: "Buff de perícia" },
+];
+
 // Treinamento: Destreinado (+0), Treinado (+5), Veterano (+10), Expert (+15).
 const TRAINING_LEVELS = [
   { value: 0, label: "Destreinado" },
@@ -118,7 +131,54 @@ const TRAINING_LEVELS = [
 ];
 
 function skillBonus(skill) {
-  return Number(skill.training || 0) + Number(skill.buff || 0);
+  return Number(skill.training || 0) + Number(skill.buff || 0) + itemBuffForSkill(skill.id);
+}
+
+// Soma todos os buffs de perícia concedidos por campos de itens (tipo "Buff de perícia")
+// vinculados à perícia informada. Um item pode ter vários campos, e vários itens
+// podem dar buff na mesma perícia — todos são somados.
+function itemBuffForSkill(skillId) {
+  if (!character || !character.items) return 0;
+  let total = 0;
+  character.items.forEach((it) => {
+    (it.fields || []).forEach((f) => {
+      if (f.kind === "skillBuff" && f.skillId === skillId) {
+        total += Number(f.value || 0);
+      }
+    });
+  });
+  return total;
+}
+
+// Mantém o ataque vinculado a um item do tipo "Arma" sempre em dia: cria o
+// ataque na primeira vez, atualiza nome/dado/crítico quando o item muda, e
+// remove o ataque se o item deixar de ser uma arma.
+function syncItemAttack(item) {
+  if (item.type !== "arma") {
+    if (item.linkedAttackId) {
+      character.attacks = character.attacks.filter((a) => a.id !== item.linkedAttackId);
+      item.linkedAttackId = null;
+    }
+    return;
+  }
+  let attack = character.attacks.find((a) => a.id === item.linkedAttackId);
+  if (!attack) {
+    attack = {
+      id: uid(),
+      name: item.name,
+      dice: item.attackRoll || "1d6",
+      critRange: item.critRange || "20",
+      critMultiplier: item.critMultiplier || "2",
+      skillId: null,
+    };
+    character.attacks.push(attack);
+    item.linkedAttackId = attack.id;
+  } else {
+    attack.name = item.name;
+    attack.dice = item.attackRoll || attack.dice;
+    attack.critRange = item.critRange || attack.critRange;
+    attack.critMultiplier = item.critMultiplier || attack.critMultiplier;
+  }
 }
 
 function emptyCharacter() {
@@ -169,6 +229,16 @@ function normalizeCharacter(character) {
   if (!character.attacks) character.attacks = [];
   character.attacks.forEach((a) => {
     if (a.skillId === undefined) a.skillId = null;
+  });
+
+  if (!character.items) character.items = [];
+  character.items.forEach((it) => {
+    if (!it.type) it.type = "equipavel";
+    if (!it.fields) it.fields = [];
+    if (it.linkedAttackId === undefined) it.linkedAttackId = null;
+    if (it.attackRoll === undefined) it.attackRoll = "";
+    if (it.critRange === undefined) it.critRange = "";
+    if (it.critMultiplier === undefined) it.critMultiplier = "2";
   });
 
   if (!character.rollHistory) character.rollHistory = [];
@@ -1442,6 +1512,7 @@ function renderSkills() {
         <span class="skill-name-wrap">
           <span class="skill-icon">${ICONS.dice}</span>
           <input type="text" class="skill-name skill-input" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
+          ${itemBuffForSkill(s.id) ? `<span class="item-buff-badge" title="Bônus vindo de item(ns) equipados">+${itemBuffForSkill(s.id)} item</span>` : ""}
         </span>
         <div class="skill-row-controls">
           <select class="training-select skill-input" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
@@ -1481,26 +1552,70 @@ function renderAbilities() {
   return `${cards}<button class="btn-add" data-action="add-ability">${ICONS.plus} adicionar habilidade</button>`;
 }
 
+function renderItemField(it, f) {
+  const kindOptions = ITEM_FIELD_KINDS
+    .map((k) => `<option value="${k.value}" ${f.kind === k.value ? "selected" : ""}>${k.label}</option>`)
+    .join("");
+
+  if (f.kind === "skillBuff") {
+    const skillOptions = character.skills
+      .map((s) => `<option value="${s.id}" ${f.skillId === s.id ? "selected" : ""}>${esc(s.name)}</option>`)
+      .join("");
+    return `
+      <div class="item-field-row">
+        <select class="item-field-kind" data-item-field="kind" data-item-id="${it.id}" data-field-id="${f.id}" data-select="true" title="Tipo de campo">${kindOptions}</select>
+        <select class="item-field-skill" data-item-field="skillId" data-item-id="${it.id}" data-field-id="${f.id}" data-select="true" title="Perícia que recebe o buff">${skillOptions}</select>
+        <input type="number" class="item-field-value" data-item-field="value" data-item-id="${it.id}" data-field-id="${f.id}" data-numeric="true" value="${f.value || 0}" title="Valor do buff" placeholder="+valor" />
+        <button class="trash-btn" data-action="remove-item-field" data-item-id="${it.id}" data-field-id="${f.id}">${ICONS.trash}</button>
+      </div>`;
+  }
+
+  return `
+    <div class="item-field-row">
+      <select class="item-field-kind" data-item-field="kind" data-item-id="${it.id}" data-field-id="${f.id}" data-select="true" title="Tipo de campo">${kindOptions}</select>
+      <input type="text" class="item-field-label" data-item-field="label" data-item-id="${it.id}" data-field-id="${f.id}" value="${esc(f.label || "")}" placeholder="Nome do campo (ex: dados de efeito)" />
+      <input type="text" class="item-field-value" data-item-field="value" data-item-id="${it.id}" data-field-id="${f.id}" value="${esc(f.value || "")}" placeholder="Valor (ex: 2d6 fogo, alcance 9m...)" />
+      <button class="trash-btn" data-action="remove-item-field" data-item-id="${it.id}" data-field-id="${f.id}">${ICONS.trash}</button>
+    </div>`;
+}
+
 function renderItems() {
   const cards = character.items
-    .map(
-      (it) => `
+    .map((it) => {
+      const isArma = it.type === "arma";
+      const typeOptions = ITEM_TYPES
+        .map((t) => `<option value="${t.value}" ${it.type === t.value ? "selected" : ""}>${t.label}</option>`)
+        .join("");
+      const fieldsHtml = (it.fields || []).map((f) => renderItemField(it, f)).join("");
+      return `
       <div class="card-box" data-id="${it.id}">
         <div class="card-box-header">
           <input type="text" data-list="items" data-id="${it.id}" data-field="name" value="${esc(it.name)}" />
           <button class="trash-btn" data-action="remove" data-list="items" data-id="${it.id}">${ICONS.trash}</button>
         </div>
+        <select class="item-type-select" data-list="items" data-id="${it.id}" data-field="type" data-select="true" title="Tipo do item">${typeOptions}</select>
         <textarea rows="2" data-list="items" data-id="${it.id}" data-field="description" placeholder="Descrição do item...">${esc(it.description)}</textarea>
+        ${isArma ? `
         <div class="item-attack-row">
           <input type="text" data-list="items" data-id="${it.id}" data-field="attackRoll" placeholder="Rolagem de ataque (ex: 1d8+2)" value="${esc(it.attackRoll)}" />
           <input type="text" class="crit" data-list="items" data-id="${it.id}" data-field="critRange" placeholder="Crítico (ex: 20 ou 19-20)" value="${esc(it.critRange)}" />
           <input type="text" data-list="items" data-id="${it.id}" data-field="critMultiplier" placeholder="×2" value="${esc(it.critMultiplier || "")}" style="width:52px;text-align:center;" title="Multiplicador de dano no crítico" />
           ${it.attackRoll ? `<button class="dice-btn" data-action="roll-item" data-id="${it.id}" title="Rolar">${ICONS.dice}</button>` : ""}
         </div>
-      </div>`
-    )
+        <p class="helper-text" style="font-size:11px;margin:2px 0 8px;">Sincronizado automaticamente com um ataque na aba "Ataques".</p>` : ""}
+        <div class="item-fields">${fieldsHtml}</div>
+        <button class="btn-add btn-add-small" data-action="add-item-field" data-id="${it.id}">${ICONS.plus} campo</button>
+      </div>`;
+    })
     .join("");
-  return `${cards}<button class="btn-add" data-action="add-item">${ICONS.plus} adicionar item</button>`;
+  return `
+    <p class="helper-text" style="margin-bottom:10px;">
+      Escolha o tipo do item (Equipável, Arma ou Utilizável). Itens do tipo Arma ganham um ataque
+      correspondente automaticamente na aba "Ataques". Use "+ campo" para adicionar efeitos livres
+      (dados de efeito, habilidades em área etc.) ou um "Buff de perícia", que soma direto no bônus
+      daquela perícia na aba Perícias.
+    </p>
+    ${cards}<button class="btn-add" data-action="add-item">${ICONS.plus} adicionar item</button>`;
 }
 
 function renderAttacks() {
@@ -2180,12 +2295,70 @@ function attachEvents() {
       const item = list.find((x) => x.id === input.dataset.id);
       if (!item) return;
       item[input.dataset.field] = input.dataset.numeric ? Number(input.value || 0) : input.value;
+      if (input.dataset.list === "items") {
+        const typeChanged = input.dataset.field === "type";
+        syncItemAttack(item);
+        if (typeChanged) render();
+      }
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-item-field]").forEach((input) => {
+    const eventName = input.dataset.select === "true" ? "change" : "input";
+    input.addEventListener(eventName, () => {
+      const it = character.items.find((x) => x.id === input.dataset.itemId);
+      if (!it) return;
+      const f = (it.fields || []).find((x) => x.id === input.dataset.fieldId);
+      if (!f) return;
+      const field = input.dataset.itemField;
+      const newValue = input.dataset.numeric ? Number(input.value || 0) : input.value;
+      const kindChanged = field === "kind" && newValue !== f.kind;
+      f[field] = newValue;
+      if (kindChanged) {
+        if (newValue === "skillBuff") {
+          f.skillId = character.skills[0]?.id || null;
+          f.value = 0;
+          delete f.label;
+        } else {
+          f.value = "";
+          delete f.skillId;
+        }
+        render();
+      }
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-item-field']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const it = character.items.find((x) => x.id === btn.dataset.id);
+      if (!it) return;
+      if (!it.fields) it.fields = [];
+      it.fields.push({ id: uid(), kind: "text", label: "", value: "" });
+      render();
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='remove-item-field']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const it = character.items.find((x) => x.id === btn.dataset.itemId);
+      if (!it) return;
+      it.fields = (it.fields || []).filter((f) => f.id !== btn.dataset.fieldId);
+      render();
       scheduleSave();
     });
   });
 
   document.querySelectorAll("[data-action='remove']").forEach((btn) => {
     btn.addEventListener("click", () => {
+      if (btn.dataset.list === "items") {
+        const it = character.items.find((x) => x.id === btn.dataset.id);
+        if (it && it.linkedAttackId) {
+          character.attacks = character.attacks.filter((a) => a.id !== it.linkedAttackId);
+        }
+      }
       character[btn.dataset.list] = character[btn.dataset.list].filter((x) => x.id !== btn.dataset.id);
       render();
       scheduleSave();
@@ -2194,7 +2367,7 @@ function attachEvents() {
 
   bindAction("add-skill", () => character.skills.push({ id: uid(), name: "Nova Perícia", training: 0, buff: 0 }));
   bindAction("add-ability", () => character.abilities.push({ id: uid(), name: "Nova Habilidade", description: "" }));
-  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", attackRoll: "", critRange: "", critMultiplier: "2" }));
+  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", type: "equipavel", attackRoll: "", critRange: "", critMultiplier: "2", linkedAttackId: null, fields: [] }));
   bindAction("add-attack", () => character.attacks.push({ id: uid(), name: "Novo Ataque", dice: "1d6", critRange: "20", critMultiplier: "2" }));
 
   bindAction("level-down", () => {
