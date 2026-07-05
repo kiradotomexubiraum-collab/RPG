@@ -74,6 +74,7 @@ let editingMonsterId = null; // id do monstro do bestiário em edição (só o d
 let editMonsterFormError = "";
 
 let activeTab = "class";
+let lastRenderedTab = null; // usado para só disparar o glitch quando a aba realmente muda
 let toast = null;
 let classConfirm = false;
 let showHistory = false;
@@ -696,6 +697,8 @@ function animateRoll(baseLabel, sides, diceCount, finalToast) {
       toast = finalToast;
       pushRollHistory(finalToast);
       render();
+      if (finalToast.crit) playCritSound();
+      else if (finalToast.fumble) playFumbleSound();
       setTimeout(() => { toast = null; render(); }, 4500);
       return;
     }
@@ -705,6 +708,51 @@ function animateRoll(baseLabel, sides, diceCount, finalToast) {
     setTimeout(step, 70);
   };
   step();
+}
+
+// ---------- Sons de crítico / falha crítica (sintetizados, sem arquivos externos) ----------
+let _audioCtx = null;
+function getAudioCtx() {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === "suspended") _audioCtx.resume();
+    return _audioCtx;
+  } catch {
+    return null;
+  }
+}
+
+// Toca uma nota simples (oscilador + envelope) no instante indicado.
+function playTone(freq, startOffset, duration, type, gainPeak) {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type || "triangle";
+  osc.frequency.value = freq;
+  const t0 = ctx.currentTime + startOffset;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(gainPeak || 0.18, t0 + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.05);
+}
+
+// Fanfarra ascendente — acerto crítico.
+function playCritSound() {
+  playTone(523.25, 0, 0.16, "triangle", 0.16);
+  playTone(659.25, 0.09, 0.16, "triangle", 0.16);
+  playTone(783.99, 0.18, 0.28, "triangle", 0.18);
+  playTone(1046.5, 0.18, 0.32, "sine", 0.12);
+}
+
+// Som grave e dissonante, descendente — falha crítica.
+function playFumbleSound() {
+  playTone(196, 0, 0.22, "sawtooth", 0.14);
+  playTone(174.61, 0.1, 0.24, "sawtooth", 0.14);
+  playTone(130.81, 0.2, 0.4, "sawtooth", 0.16);
 }
 
 // Gera os pontos de um polígono regular com N lados (visual do dado —
@@ -1734,7 +1782,8 @@ function renderSheet() {
         </div>
         <div class="sheet-col sheet-col-right">
           <div class="tabs tabs-inline">${tabsHtml}</div>
-          <div class="tab-content">${renderTabContent()}</div>
+          <div class="tab-content ${activeTab !== lastRenderedTab ? "tab-glitch" : ""}">${renderTabContent()}</div>
+          ${(lastRenderedTab = activeTab) && ""}
         </div>
       </div>
     </div>`;
@@ -2810,7 +2859,7 @@ async function init() {
   } else {
     clearAuth();
     screen = "login";
-    loginError = "Sua sessão expirou. Faça login novamente!";
+    loginError = "Sua sessão expirou. Faça login novamente.";
     render();
   }
 }
