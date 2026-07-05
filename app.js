@@ -1457,13 +1457,9 @@ function renderSheet() {
           <button class="btn-back" data-action="back-to-list">← meus personagens</button>
         </div>
       </div>
-      <div class="sheet-body">
-        <div class="tabs">${tabsHtml}</div>
-        <div class="sheet-main">
-          ${sheetReadOnly ? `<div class="readonly-banner">👁 Somente leitura — você não tem permissão para editar a ficha deste personagem.</div>` : ""}
-          <div class="tab-content ${sheetReadOnly ? "readonly-lock" : ""}">${renderTabContent()}</div>
-        </div>
-      </div>
+      <div class="tabs">${tabsHtml}</div>
+      ${sheetReadOnly ? `<div class="readonly-banner">👁 Somente leitura — você não tem permissão para editar a ficha deste personagem.</div>` : ""}
+      <div class="tab-content ${sheetReadOnly ? "readonly-lock" : ""}">${renderTabContent()}</div>
     </div>`;
 }
 
