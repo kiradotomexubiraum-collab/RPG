@@ -1,13 +1,13 @@
 :root {
   /* Paleta medieval: pergaminho envelhecido, couro, ouro e vinho. */
-  --bg: #2b2016;
-  --bg-alt: #35281c;
-  --ink: #2b2016;
-  --paper: #ecdcb8;               /* pergaminho claro — "cartão" principal */
-  --paper-dark: #ddc79c;          /* pergaminho um tom mais escuro — abas, listas */
-  --surface-raised: #f2e6c8;
-  --ink-text: #3a2a17;            /* tinta marrom escura sobre pergaminho */
-  --text-dim: #7a6142;
+  --bg: #d8c294;
+  --bg-alt: #cbb17e;
+  --ink: #d8c294;
+  --paper: #f3e6c8;               /* pergaminho claro — "cartão" principal, elevado sobre o fundo */
+  --paper-dark: #e8d7ac;          /* pergaminho um tom mais escuro — abas, listas */
+  --surface-raised: #f8efd8;
+  --ink-text: #3a2a17;            /* tinta marrom escura — usada sobre pergaminho claro */
+  --text-dim: #6b5433;
 
   --stamp: #7a1f1f;               /* vermelho vinho/selo de cera — perigo, crítico, HP */
   --stamp-glow: rgba(122, 31, 31, 0.4);
@@ -15,22 +15,22 @@
   --teal-glow: rgba(47, 82, 51, 0.4);
   --violet: #5b3a29;              /* couro/marrom escuro — destaques, abas ativas */
   --violet-glow: rgba(91, 58, 41, 0.4);
-  --gold: #b8860b;                /* ouro velho — XP, atenção */
-  --gold-glow: rgba(184, 134, 11, 0.45);
+  --gold: #9c6f0b;                /* ouro velho — XP, atenção */
+  --gold-glow: rgba(156, 111, 11, 0.45);
   --crit: #3f6b2f;                /* verde — sucesso crítico */
   --crit-glow: rgba(63, 107, 47, 0.45);
 
-  --border: rgba(91, 58, 41, 0.35);
-  --border-strong: rgba(91, 58, 41, 0.6);
+  --border: rgba(58, 42, 23, 0.3);
+  --border-strong: rgba(58, 42, 23, 0.55);
 }
 
 body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 15% 0%, rgba(184, 134, 11, 0.12), transparent 45%),
+    radial-gradient(circle at 15% 0%, rgba(156, 111, 11, 0.14), transparent 45%),
     radial-gradient(circle at 85% 15%, rgba(47, 82, 51, 0.10), transparent 40%),
-    radial-gradient(circle at 50% 100%, rgba(122, 31, 31, 0.08), transparent 50%),
+    radial-gradient(circle at 50% 100%, rgba(122, 31, 31, 0.06), transparent 50%),
     repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 1px, transparent 1px, transparent 3px),
     var(--bg);
   background-attachment: fixed;
@@ -375,19 +375,28 @@ textarea { resize: vertical; }
 .btn-stamp:hover { box-shadow: 0 0 18px var(--stamp-glow); }
 
 .btn-link {
-  background: transparent;
+  display: inline-block;
+  background: rgba(47, 82, 51, 0.08);
   color: var(--teal);
   text-decoration: none;
-  border-bottom: 1px solid transparent;
-  padding: 4px 0;
-  font-family: 'IM Fell English', 'EB Garamond', serif;
-  font-size: 14px;
-  font-weight: 600;
+  border: 1px solid var(--teal);
+  border-radius: 5px;
+  padding: 7px 16px;
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  text-align: center;
   cursor: pointer;
+  transition: box-shadow 0.15s, background 0.15s;
 }
-.btn-link:hover { border-bottom-color: var(--teal); text-shadow: 0 0 10px var(--teal-glow); }
-.btn-link.danger { color: var(--stamp); }
-.btn-link.danger:hover { border-bottom-color: var(--stamp); text-shadow: 0 0 10px var(--stamp-glow); }
+.btn-link:hover { box-shadow: 0 0 14px var(--teal-glow); background: rgba(47, 82, 51, 0.16); }
+.btn-link.danger {
+  background: rgba(122, 31, 31, 0.08);
+  color: var(--stamp);
+  border-color: var(--stamp);
+}
+.btn-link.danger:hover { box-shadow: 0 0 14px var(--stamp-glow); background: rgba(122, 31, 31, 0.16); }
 
 /* Botões de "voltar" — sem glow, sem sombra, sem efeito de clique. Só uma
    mudança discreta de cor no hover. */
@@ -435,9 +444,16 @@ textarea { resize: vertical; }
   border: 1px solid var(--border);
   overflow: hidden;
   margin-bottom: 8px;
+  isolation: isolate;
 }
 
-.bar-fill { height: 100%; transition: width 0.3s; filter: drop-shadow(0 0 6px currentColor); }
+.bar-fill {
+  height: 100%;
+  max-width: 100%;
+  border-radius: 6px;
+  transition: width 0.3s;
+  box-shadow: 0 0 6px currentColor;
+}
 
 .bar-inputs {
   display: flex;
@@ -925,21 +941,21 @@ textarea { resize: vertical; }
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 50% 30%, transparent 30%, rgba(2, 3, 6, 0.55) 100%);
+  background: radial-gradient(circle at 50% 30%, transparent 40%, rgba(58, 42, 23, 0.18) 100%);
   pointer-events: none;
 }
 
 .login-card {
   max-width: 420px;
   width: 100%;
-  background: linear-gradient(180deg, rgba(16, 21, 29, 0.94), rgba(11, 15, 22, 0.97));
+  background: linear-gradient(180deg, var(--surface-raised), var(--paper));
   border: 1px solid var(--gold);
   border-image: none;
   outline: 1px solid var(--border);
   outline-offset: -6px;
   border-radius: 4px;
   padding: 2rem 1.85rem;
-  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.8), 0 0 50px rgba(184, 134, 11, 0.08);
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.5), 0 0 50px rgba(156, 111, 11, 0.12);
   position: relative;
   z-index: 1;
 }
@@ -1023,9 +1039,8 @@ textarea { resize: vertical; }
   gap: 10px;
 }
 .char-list-item-footer .btn-link.danger {
-  font-size: 11px;
-  font-family: 'Cinzel', serif;
-  opacity: 0.8;
+  font-size: 10px;
+  padding: 5px 12px;
 }
 .char-list-item-footer .btn-link.danger:hover { opacity: 1; }
 
