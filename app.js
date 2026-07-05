@@ -1,5 +1,32 @@
 // ---------- Estado global ----------
 let screen = "loading"; // loading | login | list | sheet
+
+// ---------- Tema (claro/escuro) ----------
+// Salvo no localStorage do navegador, então persiste sem precisar mudar toda vez.
+const THEME_KEY = "rpg_theme";
+
+function getTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) || "light";
+  } catch {
+    return "light";
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+}
+
+function toggleTheme() {
+  const next = getTheme() === "dark" ? "light" : "dark";
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {}
+  applyTheme(next);
+  render();
+}
+
+applyTheme(getTheme());
 let character = null;
 let currentPath = null;
 let currentSha = null;
@@ -858,6 +885,7 @@ function renderLoading() {
 function renderLogin() {
   return `
     <div class="center-box login-screen">
+      <button class="theme-toggle-btn" data-action="toggle-theme" title="Alternar modo claro/escuro">${getTheme() === "dark" ? "☀ Modo claro" : "🌙 Modo escuro"}</button>
       <div class="login-card">
         <div class="eyebrow">Arquivo da Ordem</div>
         <h1 class="char-name" style="margin-bottom:1rem;">Acesso Restrito</h1>
@@ -881,11 +909,14 @@ function renderLogin() {
 
 function renderNavTabs(active) {
   return `
-    <div class="nav-tabs">
-      <button class="nav-tab ${active === "characters" ? "active" : ""}" data-action="nav-characters">Meus Personagens</button>
-      <button class="nav-tab ${active === "campaigns" ? "active" : ""}" data-action="nav-campaigns">Campanhas</button>
-      <button class="nav-tab ${active === "monsters" ? "active" : ""}" data-action="nav-monsters">Monstros</button>
-      <button class="nav-tab ${active === "system" ? "active" : ""}" data-action="nav-system">Livro do Sistema</button>
+    <div class="nav-tabs-wrap">
+      <div class="nav-tabs">
+        <button class="nav-tab ${active === "characters" ? "active" : ""}" data-action="nav-characters">Meus Personagens</button>
+        <button class="nav-tab ${active === "campaigns" ? "active" : ""}" data-action="nav-campaigns">Campanhas</button>
+        <button class="nav-tab ${active === "monsters" ? "active" : ""}" data-action="nav-monsters">Monstros</button>
+        <button class="nav-tab ${active === "system" ? "active" : ""}" data-action="nav-system">Livro do Sistema</button>
+      </div>
+      <button class="theme-toggle-btn theme-toggle-btn-inline" data-action="toggle-theme" title="Alternar modo claro/escuro">${getTheme() === "dark" ? "☀" : "🌙"}</button>
     </div>`;
 }
 
@@ -2040,6 +2071,10 @@ function attachEvents() {
       }
     });
   }
+
+  document.querySelectorAll("[data-action='toggle-theme']").forEach((btn) => {
+    btn.addEventListener("click", toggleTheme);
+  });
 
   document.querySelectorAll("[data-action='logout']").forEach((btn) => {
     btn.addEventListener("click", () => {
