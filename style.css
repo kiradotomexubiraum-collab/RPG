@@ -895,13 +895,25 @@ textarea { resize: vertical; }
   color: var(--teal);
   font-size: 11px;
   font-family: 'Orbitron', monospace;
-  padding: 4px 0 0;
-  margin-top: 10px;
-  display: block;
+  padding: 0;
   cursor: pointer;
   opacity: 0.8;
 }
 .btn-copy-id:hover { opacity: 1; text-shadow: 0 0 8px var(--teal-glow); }
+
+.char-list-item-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  gap: 10px;
+}
+.char-list-item-footer .btn-link.danger {
+  font-size: 11px;
+  font-family: 'Orbitron', monospace;
+  opacity: 0.8;
+}
+.char-list-item-footer .btn-link.danger:hover { opacity: 1; }
 
 .btn-add {
   display: inline-flex;
