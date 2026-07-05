@@ -27,6 +27,25 @@ function toggleTheme() {
 }
 
 applyTheme(getTheme());
+
+// ---------- Reforço: garante que deleteFile sempre exista ----------
+// Em alguns casos o github-api.js publicado no repositório pode estar
+// desatualizado e não ter essa função. Para as funcionalidades de apagar
+// (personagem, campanha, livro do sistema etc.) não dependerem disso,
+// definimos aqui uma versão própria, só se ela ainda não existir.
+if (typeof deleteFile !== "function") {
+  window.deleteFile = async function deleteFile(path, knownSha, commitMessage) {
+    const res = await fetch(`${GH_API}/contents/${path}`, {
+      method: "DELETE",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ message: commitMessage, sha: knownSha }),
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`Falha ao apagar ${path}: status ${res.status} — ${errBody}`);
+    }
+  };
+}
 let character = null;
 let currentPath = null;
 let currentSha = null;
