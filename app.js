@@ -1161,7 +1161,10 @@ function renderCampaignDashboard() {
       <div class="login-card" style="max-width:640px;">
         <button class="btn-back" data-action="back-to-campaigns" style="margin-bottom:10px;display:block;">← campanhas</button>
         <div class="eyebrow">Painel da Campanha</div>
-        <h1 class="char-name" style="margin-bottom:1rem;">${esc(cd.campaign.name)}</h1>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+          <h1 class="char-name" style="margin-bottom:1rem;">${esc(cd.campaign.name)}</h1>
+          ${isGm ? `<button class="btn-link danger" data-action="delete-campaign" data-slug="${esc(currentCampaignSlug)}" data-name="${esc(cd.campaign.name)}">apagar campanha</button>` : ""}
+        </div>
         ${campaignDashError ? `<p class="login-error">${esc(campaignDashError)}</p>` : ""}
 
         <h2 class="section-title">Descrição</h2>
@@ -1920,6 +1923,31 @@ async function deleteCharacter(path, sha, name) {
   }
 }
 
+// Apaga uma campanha por completo: remove os 4 arquivos que a compõem no
+// repositório (campaign.json, members.json, linked_characters.json,
+// monsters.json). Não apaga os personagens vinculados — só o vínculo some
+// junto com a campanha, os personagens continuam existindo normalmente.
+async function deleteCampaign(slug, name) {
+  if (!confirm(`Apagar a campanha "${name}"? Isso remove a campanha para todo mundo (mestre e jogadores). Os personagens vinculados NÃO são apagados. Essa ação não pode ser desfeita.`)) return;
+  campaignDashError = "";
+  render();
+  const files = ["campaign.json", "members.json", "linked_characters.json", "monsters.json"];
+  try {
+    for (const file of files) {
+      const path = `campaigns/${slug}/${file}`;
+      const res = await readJsonFile(path);
+      if (res) await deleteFile(path, res.sha, `chore: apaga campanha "${name}"`);
+    }
+    campaignList = campaignList.filter((c) => c.slug !== slug);
+    allCampaignsList = allCampaignsList.filter((c) => c.slug !== slug);
+    currentCampaign = null;
+    goToCampaigns();
+  } catch (err) {
+    campaignDashError = "Não foi possível apagar a campanha: " + (err.message || err);
+    render();
+  }
+}
+
 async function goToCampaigns() {
   screen = "campaigns";
   campaignsSubTab = "mine";
@@ -2153,6 +2181,10 @@ function attachEvents() {
 
   document.querySelectorAll("[data-action='open-character']").forEach((btn) => {
     btn.addEventListener("click", () => openCharacter(btn.dataset.path));
+  });
+
+  document.querySelectorAll("[data-action='delete-campaign']").forEach((btn) => {
+    btn.addEventListener("click", () => deleteCampaign(btn.dataset.slug, btn.dataset.name));
   });
 
   document.querySelectorAll("[data-action='delete-character']").forEach((btn) => {
@@ -2859,7 +2891,7 @@ async function init() {
   } else {
     clearAuth();
     screen = "login";
-    loginError = "Sua sessão expirou. Faça login novamente!";
+    loginError = "Sua sessão expirou. Faça login novamente.";
     render();
   }
 }
