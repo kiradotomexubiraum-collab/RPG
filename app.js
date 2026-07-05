@@ -939,7 +939,7 @@ function renderCampaignDashboard() {
         <li class="char-card" style="border-color:${entry.color};">
           <div class="char-card-top">
             <span><strong>${esc(entry.characterOwner)}</strong> — ${esc(entry.characterId)} <span class="helper-text">(não encontrado)</span></span>
-            ${isGm ? `<button class="btn-link danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
+            ${isGm ? `<button class="btn danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
           </div>
         </li>`;
       }
@@ -1173,8 +1173,8 @@ function renderBestiary() {
               isOwner
                 ? `
               <span class="monster-card-owner-actions">
-                <button class="btn-link" data-action="edit-monster" data-id="${esc(m.id)}">editar</button>
-                <button class="btn-link danger" data-action="do-delete-monster" data-id="${esc(m.id)}">apagar</button>
+                <button class="btn" data-action="edit-monster" data-id="${esc(m.id)}">editar</button>
+                <button class="btn danger" data-action="do-delete-monster" data-id="${esc(m.id)}">apagar</button>
               </span>`
                 : ""
             }
@@ -1557,7 +1557,7 @@ function renderSheet() {
         </div>
         <div class="sheet-topbar-right">
           <span class="stamp">confidencial</span>
-          <button class="btn-link" data-action="toggle-history">histórico de rolagens</button>
+          <button class="btn btn-teal" data-action="toggle-history">histórico de rolagens</button>
           ${sheetCampaignSlug ? `<button class="btn-back" data-action="back-to-campaign">← voltar para campanha</button>` : ""}
           <button class="btn-back" data-action="back-to-list">← meus personagens</button>
         </div>
