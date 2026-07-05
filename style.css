@@ -70,7 +70,7 @@ body.screen-login .login-card {
 }
 
 .sheet {
-  max-width: 1040px;
+  max-width: 760px;
   margin: 0 auto;
   background: linear-gradient(180deg, var(--paper), var(--bg-alt));
   border: 1px solid var(--border);
@@ -124,57 +124,42 @@ body.screen-login .login-card {
   box-shadow: 0 0 12px var(--stamp-glow) inset, 0 0 12px var(--stamp-glow);
 }
 
-.sheet-body {
-  display: flex;
-  align-items: stretch;
-  min-height: 480px;
-}
-
 .tabs {
   display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  width: 190px;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 4px;
   background: var(--bg-alt);
-  border-right: 1px solid var(--border);
-  padding: 14px 8px;
+  padding: 10px 12px 0;
 }
 
 .tab-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
+  gap: 6px;
+  padding: 8px 16px;
   font-family: 'Cinzel', 'Rajdhani', serif;
   font-size: 12px;
   letter-spacing: 0.5px;
   color: var(--text-dim);
   background: transparent;
   border: none;
-  border-left: 2px solid transparent;
-  border-radius: 4px;
+  border-top: 2px solid transparent;
+  border-radius: 4px 4px 0 0;
   cursor: pointer;
-  text-align: left;
   transition: color 0.15s, background 0.15s;
 }
 
 .tab-btn:hover { color: var(--ink-text); background: rgba(138, 106, 47, 0.08); }
 
 .tab-btn.active {
-  background: rgba(138, 106, 47, 0.12);
+  background: var(--paper);
   color: var(--violet);
-  border-left-color: var(--violet);
-  box-shadow: 0 0 20px -10px var(--violet-glow) inset;
-}
-
-.sheet-main {
-  flex: 1;
-  min-width: 0;
+  border-top-color: var(--violet);
+  box-shadow: 0 -8px 20px -8px var(--violet-glow) inset;
 }
 
 .tab-content {
-  padding: 1.25rem 1.5rem;
+  padding: 1.5rem;
 }
 
 .tab-content.glitch-in {
@@ -189,18 +174,6 @@ body.screen-login .login-card {
   60%  { opacity: 0.7; transform: translateX(-2px); clip-path: inset(15% 0 0 10%); filter: hue-rotate(-15deg); }
   80%  { opacity: 1;   transform: translateX(1px);  clip-path: inset(0); }
   100% { opacity: 1;   transform: translateX(0);    clip-path: inset(0); filter: none; }
-}
-
-@media (max-width: 720px) {
-  .sheet-body { flex-direction: column; }
-  .tabs {
-    flex-direction: row;
-    flex-wrap: wrap;
-    width: 100%;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  .tab-btn.active { border-left-color: transparent; border-bottom: 2px solid var(--violet); }
 }
 
 .field {
