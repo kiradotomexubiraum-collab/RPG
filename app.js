@@ -1601,7 +1601,7 @@ function renderSkills() {
           <button class="promote-btn" data-action="promote-training" data-id="${s.id}" title="Sobe uma patente de treinamento" ${atExpert ? "disabled" : ""}>▲</button>
           <input type="number" class="buff skill-input" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
           <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
-          ${s.mandatory ? "" : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
+          ${s.mandatory ? `<span class="trash-btn-spacer"></span>` : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
         </div>
       </div>`;
     })
