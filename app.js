@@ -133,7 +133,7 @@ function emptyCharacter() {
   return {
     basic: { name: "Investigador Sem Nome", photoUrl: "", age: "", weight: "", height: "", financialStatus: "Estável" },
     classInfo: { skipped: false, name: "", fields: [], notes: "" },
-    resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20, xp: 0, gold: 0 },
+    resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20, xp: 0, gold: 0, temperature: 37, temperatureMax: 42 },
     skills,
     abilities: [],
     items: [],
@@ -175,6 +175,13 @@ function normalizeCharacter(character) {
 
   if (!character.classInfo) character.classInfo = { skipped: false, name: "", fields: [], notes: "" };
   if (character.classInfo.notes === undefined) character.classInfo.notes = "";
+
+  if (character.resources && character.resources.temperature === undefined) {
+    character.resources.temperature = 37;
+  }
+  if (character.resources && character.resources.temperatureMax === undefined) {
+    character.resources.temperatureMax = 42;
+  }
 
   return character;
 }
@@ -1389,10 +1396,21 @@ function renderResources() {
 
     ${bar("HP", "hpCurrent", "hpMax", "var(--stamp)", "hp-value")}
     ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}
+    ${bar("Temperatura", "temperature", "temperatureMax", temperatureColor(r.temperature, r.temperatureMax))}
 
     <p class="helper-text" style="font-size:11px;margin-top:2px;">
       Máx. ${MAX_XP_PER_ADD} XP por vez · nível máximo ${MAX_LEVEL}.
     </p>`;
+}
+
+// Cor da barra de temperatura: azul quando está fria, verde na faixa normal
+// e vermelha quando está perto do limite máximo (febre / superaquecimento).
+function temperatureColor(current, max) {
+  if (!max || max <= 0) return "var(--teal)";
+  const pct = (current / max) * 100;
+  if (pct <= 40) return "#3b8fd6";
+  if (pct >= 85) return "var(--stamp)";
+  return "var(--crit)";
 }
 
 function renderSkills() {
@@ -2498,11 +2516,14 @@ function updateResourceBarsInPlace() {
   [
     { selector: ".bar-block-hpCurrent", current: r.hpCurrent, max: r.hpMax },
     { selector: ".bar-block-mpCurrent", current: r.mpCurrent, max: r.mpMax },
+    { selector: ".bar-block-temperature", current: r.temperature, max: r.temperatureMax, color: temperatureColor(r.temperature, r.temperatureMax) },
   ].forEach((cfg) => {
     const block = document.querySelector(cfg.selector);
     if (!block) return;
     const pct = cfg.max > 0 ? Math.max(0, Math.min(100, (cfg.current / cfg.max) * 100)) : 0;
-    block.querySelector(".bar-fill").style.width = pct + "%";
+    const fill = block.querySelector(".bar-fill");
+    fill.style.width = pct + "%";
+    if (cfg.color) fill.style.background = cfg.color;
     block.querySelector(".bar-top span:last-child").textContent = `${cfg.current} / ${cfg.max}`;
   });
 }
