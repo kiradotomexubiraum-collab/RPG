@@ -2910,7 +2910,7 @@ async function init() {
   } else {
     clearAuth();
     screen = "login";
-    loginError = "Sua sessão expirou. Faça login novamente.";
+    loginError = "Sua sessão expirou. Faça login novamente!";
     render();
   }
 }
