@@ -168,6 +168,8 @@ function itemBuffForSkill(skillId) {
   if (!character || !character.items) return 0;
   let total = 0;
   character.items.forEach((it) => {
+    const isActive = it.type !== "equipavel" || it.active !== false;
+    if (!isActive) return;
     (it.fields || []).forEach((f) => {
       if (f.kind === "skillBuff" && f.skillId === skillId) {
         total += Number(f.value || 0);
@@ -261,6 +263,7 @@ function normalizeCharacter(character) {
   if (!character.items) character.items = [];
   character.items.forEach((it) => {
     if (!it.type) it.type = "equipavel";
+    if (it.active === undefined) it.active = true;
     if (!it.fields) it.fields = [];
     if (it.linkedAttackId === undefined) it.linkedAttackId = null;
     if (it.attackRoll === undefined) it.attackRoll = "";
@@ -1614,17 +1617,25 @@ function renderItems() {
   const cards = character.items
     .map((it) => {
       const isArma = it.type === "arma";
+      const isEquipavel = it.type === "equipavel";
+      const isActive = it.active !== false;
       const typeOptions = ITEM_TYPES
         .map((t) => `<option value="${t.value}" ${it.type === t.value ? "selected" : ""}>${t.label}</option>`)
         .join("");
       const fieldsHtml = (it.fields || []).map((f) => renderItemField(it, f)).join("");
       return `
-      <div class="card-box" data-id="${it.id}">
+      <div class="card-box ${isEquipavel && !isActive ? "card-box-inactive" : ""}" data-id="${it.id}">
         <div class="card-box-header">
           <input type="text" data-list="items" data-id="${it.id}" data-field="name" value="${esc(it.name)}" />
           <button class="trash-btn" data-action="remove" data-list="items" data-id="${it.id}">${ICONS.trash}</button>
         </div>
-        <select class="item-type-select" data-list="items" data-id="${it.id}" data-field="type" data-select="true" title="Tipo do item">${typeOptions}</select>
+        <div class="item-type-row">
+          <select class="item-type-select" data-list="items" data-id="${it.id}" data-field="type" data-select="true" title="Tipo do item">${typeOptions}</select>
+          ${isEquipavel ? `
+          <button class="item-active-toggle ${isActive ? "is-active" : ""}" data-action="toggle-item-active" data-id="${it.id}" title="${isActive ? "Item ativado — clique para desativar" : "Item desativado — clique para ativar"}">
+            ${isActive ? "✓ Ativado" : "Desativado"}
+          </button>` : ""}
+        </div>
         <textarea rows="2" data-list="items" data-id="${it.id}" data-field="description" placeholder="Descrição do item...">${esc(it.description)}</textarea>
         ${isArma ? `
         <div class="item-attack-row">
@@ -1634,6 +1645,7 @@ function renderItems() {
           ${it.attackRoll ? `<button class="dice-btn" data-action="roll-item" data-id="${it.id}" title="Rolar">${ICONS.dice}</button>` : ""}
         </div>
         <p class="helper-text" style="font-size:11px;margin:2px 0 8px;">Sincronizado automaticamente com um ataque na aba "Ataques".</p>` : ""}
+        ${isEquipavel && !isActive ? `<p class="helper-text" style="font-size:11px;margin:2px 0 8px;color:var(--stamp);">Item desativado: buffs de perícia deste item não estão sendo aplicados.</p>` : ""}
         <div class="item-fields">${fieldsHtml}</div>
         <button class="btn-add btn-add-small" data-action="add-item-field" data-id="${it.id}">${ICONS.plus} campo</button>
       </div>`;
@@ -1642,9 +1654,10 @@ function renderItems() {
   return `
     <p class="helper-text" style="margin-bottom:10px;">
       Escolha o tipo do item (Equipável, Arma ou Utilizável). Itens do tipo Arma ganham um ataque
-      correspondente automaticamente na aba "Ataques". Use "+ campo" para adicionar efeitos livres
-      (dados de efeito, habilidades em área etc.) ou um "Buff de perícia", que soma direto no bônus
-      daquela perícia na aba Perícias.
+      correspondente automaticamente na aba "Ataques". Itens Equipáveis podem ser ativados/desativados
+      (como vestir/tirar o item). Use "+ campo" para adicionar efeitos livres (dados de efeito,
+      habilidades em área etc.) ou um "Buff de perícia", que soma direto no bônus daquela perícia na
+      aba Perícias — enquanto o item Equipável estiver ativado.
     </p>
     ${cards}<button class="btn-add" data-action="add-item">${ICONS.plus} adicionar item</button>`;
 }
@@ -2365,6 +2378,15 @@ function attachEvents() {
     });
   });
 
+  document.querySelectorAll("[data-action='toggle-item-active']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const it = character.items.find((x) => x.id === btn.dataset.id);
+      if (!it) return;
+      it.active = it.active === false ? true : false;
+      render();
+      scheduleSave();
+    });
+  });
   document.querySelectorAll("[data-action='add-item-field']").forEach((btn) => {
     btn.addEventListener("click", () => {
       const it = character.items.find((x) => x.id === btn.dataset.id);
@@ -2402,7 +2424,7 @@ function attachEvents() {
 
   bindAction("add-skill", () => character.skills.push({ id: uid(), name: "Nova Perícia", training: 0, buff: 0 }));
   bindAction("add-ability", () => character.abilities.push({ id: uid(), name: "Nova Habilidade", description: "" }));
-  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", type: "equipavel", attackRoll: "", critRange: "", critMultiplier: "2", linkedAttackId: null, fields: [] }));
+  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", type: "equipavel", active: true, attackRoll: "", critRange: "", critMultiplier: "2", linkedAttackId: null, fields: [] }));
   bindAction("add-attack", () => character.attacks.push({ id: uid(), name: "Novo Ataque", dice: "1d6", critRange: "20", critMultiplier: "2" }));
 
   bindAction("level-down", () => {
@@ -2788,7 +2810,7 @@ async function init() {
   } else {
     clearAuth();
     screen = "login";
-    loginError = "Sua sessão expirou. Faça login novamente!";
+    loginError = "Sua sessão expirou. Faça login novamente.";
     render();
   }
 }
