@@ -1417,6 +1417,20 @@ function temperatureColor(current, max) {
 }
 
 function renderSkills() {
+  const header = `
+    <div class="skill-row skill-row-header">
+      <span class="skill-name-wrap">
+        <span class="skill-icon">${ICONS.dice}</span>
+        <span>Perícia</span>
+      </span>
+      <div class="skill-row-controls">
+        <span class="skill-col-label" style="width:92px;">Treino</span>
+        <span class="skill-col-label" style="width:22px;"></span>
+        <span class="skill-col-label" style="width:38px;">Outros</span>
+        <span class="skill-col-label" style="width:22px;"></span>
+        <span class="skill-col-label" style="width:18px;"></span>
+      </div>
+    </div>`;
   const rows = character.skills
     .map((s) => {
       const trainingOptions = TRAINING_LEVELS
@@ -1425,7 +1439,10 @@ function renderSkills() {
       const atExpert = Number(s.training || 0) >= 15;
       return `
       <div class="skill-row" data-id="${s.id}">
-        <input type="text" class="skill-name skill-input" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
+        <span class="skill-name-wrap">
+          <span class="skill-icon">${ICONS.dice}</span>
+          <input type="text" class="skill-name skill-input" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
+        </span>
         <div class="skill-row-controls">
           <select class="training-select skill-input" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
           <button class="promote-btn" data-action="promote-training" data-id="${s.id}" title="Sobe uma patente de treinamento" ${atExpert ? "disabled" : ""}>▲</button>
@@ -1440,6 +1457,7 @@ function renderSkills() {
     <p class="helper-text" style="margin-bottom:6px;">
       1d20 + treinamento + buff. ▲ sobe patente (Destreinado → Expert).
     </p>
+    ${header}
     ${rows}<button class="btn-add" data-action="add-skill">${ICONS.plus} adicionar perícia</button>`;
 }
 
