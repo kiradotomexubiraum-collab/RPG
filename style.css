@@ -1,13 +1,14 @@
-:root {
-  /* Paleta medieval: pergaminho envelhecido, couro, ouro e vinho. */
+:root,
+[data-theme="light"] {
+  /* Paleta medieval clara: pergaminho envelhecido, couro, ouro e vinho. */
   --bg: #d8c294;
   --bg-alt: #cbb17e;
   --ink: #d8c294;
   --paper: #f3e6c8;               /* pergaminho claro — "cartão" principal, elevado sobre o fundo */
   --paper-dark: #e8d7ac;          /* pergaminho um tom mais escuro — abas, listas */
   --surface-raised: #f8efd8;
-  --ink-text: #3a2a17;            /* tinta marrom escura — usada sobre pergaminho claro */
-  --text-dim: #6b5433;
+  --ink-text: #2e2010;            /* tinta marrom escura — usada sobre pergaminho claro */
+  --text-dim: #5c4626;
 
   --stamp: #7a1f1f;               /* vermelho vinho/selo de cera — perigo, crítico, HP */
   --stamp-glow: rgba(122, 31, 31, 0.4);
@@ -20,23 +21,58 @@
   --crit: #3f6b2f;                /* verde — sucesso crítico */
   --crit-glow: rgba(63, 107, 47, 0.45);
 
-  --border: rgba(58, 42, 23, 0.3);
-  --border-strong: rgba(58, 42, 23, 0.55);
+  --border: rgba(46, 32, 16, 0.32);
+  --border-strong: rgba(46, 32, 16, 0.58);
+
+  --bg-tint-1: rgba(156, 111, 11, 0.14);
+  --bg-tint-2: rgba(47, 82, 51, 0.10);
+  --bg-tint-3: rgba(122, 31, 31, 0.06);
+}
+
+[data-theme="dark"] {
+  /* Paleta medieval escura: masmorra à luz de tocha — madeira, couro e brasa. */
+  --bg: #1c140c;
+  --bg-alt: #241a10;
+  --ink: #1c140c;
+  --paper: #2b2015;               /* "pergaminho" escuro — cartão principal */
+  --paper-dark: #342518;          /* superfície secundária — abas, listas */
+  --surface-raised: #3c2c1c;
+  --ink-text: #ecdcb8;            /* tinta clara sobre madeira escura */
+  --text-dim: #b39c74;
+
+  --stamp: #c9484d;               /* vermelho vivo — perigo, crítico, HP */
+  --stamp-glow: rgba(201, 72, 77, 0.4);
+  --teal: #5e9468;                /* verde musgo claro — MP, ações neutras */
+  --teal-glow: rgba(94, 148, 104, 0.4);
+  --violet: #b08b5f;              /* couro claro/bronze — destaques, abas ativas */
+  --violet-glow: rgba(176, 139, 95, 0.4);
+  --gold: #d9a521;                /* ouro à luz de tocha — XP, atenção */
+  --gold-glow: rgba(217, 165, 33, 0.45);
+  --crit: #6bb04f;                /* verde — sucesso crítico */
+  --crit-glow: rgba(107, 176, 79, 0.45);
+
+  --border: rgba(236, 220, 184, 0.16);
+  --border-strong: rgba(236, 220, 184, 0.32);
+
+  --bg-tint-1: rgba(217, 165, 33, 0.10);
+  --bg-tint-2: rgba(94, 148, 104, 0.08);
+  --bg-tint-3: rgba(201, 72, 77, 0.08);
 }
 
 body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at 15% 0%, rgba(156, 111, 11, 0.14), transparent 45%),
-    radial-gradient(circle at 85% 15%, rgba(47, 82, 51, 0.10), transparent 40%),
-    radial-gradient(circle at 50% 100%, rgba(122, 31, 31, 0.06), transparent 50%),
+    radial-gradient(circle at 15% 0%, var(--bg-tint-1), transparent 45%),
+    radial-gradient(circle at 85% 15%, var(--bg-tint-2), transparent 40%),
+    radial-gradient(circle at 50% 100%, var(--bg-tint-3), transparent 50%),
     repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 1px, transparent 1px, transparent 3px),
     var(--bg);
   background-attachment: fixed;
   padding: 0;
   font-family: 'IM Fell English', 'EB Garamond', serif;
   color: var(--ink-text);
+  transition: background-color 0.2s;
 }
 
 .sheet {
@@ -368,7 +404,7 @@ textarea { resize: vertical; }
 .btn-teal:hover { box-shadow: 0 0 18px var(--teal-glow); }
 
 .btn-stamp {
-  background: rgba(123, 31, 31, 0.12);
+  background: rgba(122, 31, 31, 0.12);
   border-color: var(--stamp);
   color: var(--stamp);
 }
@@ -927,6 +963,40 @@ textarea { resize: vertical; }
   align-items: center;
   justify-content: center;
   padding: 2rem 1rem;
+  position: relative;
+}
+
+.theme-toggle-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: var(--paper);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-family: 'Cinzel', serif;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+  z-index: 2;
+}
+.theme-toggle-btn:hover { box-shadow: 0 0 14px var(--gold-glow); }
+
+.nav-tabs-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+.nav-tabs-wrap .nav-tabs { flex: 1; margin-bottom: 0; }
+
+.theme-toggle-btn-inline {
+  position: static;
+  padding: 8px 12px;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .login-screen {
