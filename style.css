@@ -30,29 +30,33 @@
 }
 
 [data-theme="dark"] {
-  /* Fundo: quase preto, com calor de madeira/couro envelhecido, nada de neon. */
-  --bg: #080604;
-  --bg-alt: #0d0a07;
-  --ink: #080604;
-  --paper: #15100b;               /* couro/madeira escura */
-  --paper-dark: #1c1611;          /* superfície secundária (abas, listas) */
-  --surface-raised: #241c14;
-  --ink-text: #e6d9b8;            /* texto cor pergaminho */
-  --text-dim: #8f836a;
- 
-  --stamp: #7a1f1f;               /* sangue seco — perigo, crítico, HP */
-  --stamp-glow: rgba(122, 31, 31, 0.5);
-  --teal: #4a6b45;                /* verdigris/pátina de bronze — MP, ações neutras */
-  --teal-glow: rgba(74, 107, 69, 0.4);
-  --violet: #8a6a2f;               /* bronze/ouro envelhecido — destaques, abas ativas */
-  --violet-glow: rgba(138, 106, 47, 0.45);
-  --gold: #b8922c;                /* ouro antigo — XP, atenção */
-  --gold-glow: rgba(184, 146, 44, 0.4);
-  --crit: #3d8b40;                /* verde musgo — sucesso crítico */
-  --crit-glow: rgba(61, 139, 64, 0.45);
- 
-  --border: rgba(184, 146, 90, 0.16);
-  --border-strong: rgba(184, 146, 90, 0.32);
+  /* Paleta medieval escura: masmorra à luz de tocha — madeira, couro e brasa. */
+  --bg: #1c140c;
+  --bg-alt: #241a10;
+  --ink: #1c140c;
+  --paper: #2b2015;               /* "pergaminho" escuro — cartão principal */
+  --paper-dark: #342518;          /* superfície secundária — abas, listas */
+  --surface-raised: #3c2c1c;
+  --ink-text: #ecdcb8;            /* tinta clara sobre madeira escura */
+  --text-dim: #b39c74;
+
+  --stamp: #c9484d;               /* vermelho vivo — perigo, crítico, HP */
+  --stamp-glow: rgba(201, 72, 77, 0.4);
+  --teal: #5e9468;                /* verde musgo claro — MP, ações neutras */
+  --teal-glow: rgba(94, 148, 104, 0.4);
+  --violet: #b08b5f;              /* couro claro/bronze — destaques, abas ativas */
+  --violet-glow: rgba(176, 139, 95, 0.4);
+  --gold: #d9a521;                /* ouro à luz de tocha — XP, atenção */
+  --gold-glow: rgba(217, 165, 33, 0.45);
+  --crit: #6bb04f;                /* verde — sucesso crítico */
+  --crit-glow: rgba(107, 176, 79, 0.45);
+
+  --border: rgba(236, 220, 184, 0.16);
+  --border-strong: rgba(236, 220, 184, 0.32);
+
+  --bg-tint-1: rgba(217, 165, 33, 0.10);
+  --bg-tint-2: rgba(94, 148, 104, 0.08);
+  --bg-tint-3: rgba(201, 72, 77, 0.08);
 }
 
 body {
@@ -672,15 +676,47 @@ textarea { resize: vertical; }
 .item-attack-row input:first-child { flex: 1; }
 .item-attack-row input.crit { width: 90px; }
 
+.item-type-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .item-type-select {
   width: auto;
   display: inline-block;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   font-size: 12px;
   padding: 4px 8px;
   color: var(--violet);
   border-color: var(--violet);
   background: rgba(91, 58, 41, 0.08);
+}
+
+.item-active-toggle {
+  font-family: 'Cinzel', serif;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-dim);
+  transition: box-shadow 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
+}
+.item-active-toggle.is-active {
+  border-color: var(--crit);
+  color: var(--crit);
+  background: rgba(63, 107, 47, 0.1);
+}
+.item-active-toggle.is-active:hover { box-shadow: 0 0 12px var(--crit-glow); }
+.item-active-toggle:not(.is-active):hover { border-color: var(--stamp); color: var(--stamp); }
+
+.card-box-inactive {
+  opacity: 0.6;
+  filter: saturate(0.6);
 }
 
 .item-fields {
