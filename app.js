@@ -73,6 +73,11 @@ let currentCampaign = null;   // { campaign, members, linked, membersSha, linked
 let campaignDashError = "";
 let linkOwnerInput = "";
 let linkCharIdInput = "";
+let linkSearchResults = [];
+let linkSearchedOwner = "";
+let linkSearchLoading = false;
+let linkSearchError = "";
+let showManualLink = false;
 let campaignDescSaving = false;
 let campaignDescSaved = false;
 
@@ -1209,12 +1214,39 @@ function renderCampaignDashboard() {
           isGm
             ? `
         <h2 class="section-title">Vincular Novo Personagem</h2>
-        <p class="helper-text" style="margin-bottom:8px;">Peça ao jogador o username do GitHub e o ID do personagem (visível na tela "Meus Personagens" dele, ou você pode pedir para ele copiar o ID da URL/arquivo).</p>
+        <p class="helper-text" style="margin-bottom:8px;">Digite o username do GitHub do jogador e busque os personagens dele — não precisa mais saber o ID de cor.</p>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
           <input type="text" id="link-owner-input" placeholder="username do jogador" value="${esc(linkOwnerInput)}" />
+          <button class="btn btn-teal" data-action="search-linkable-characters" ${linkSearchLoading ? "disabled" : ""}>${linkSearchLoading ? "Buscando..." : "Buscar"}</button>
+        </div>
+        ${linkSearchError ? `<p class="login-error">${esc(linkSearchError)}</p>` : ""}
+        ${
+          linkSearchResults.length
+            ? `
+        <ul class="link-search-results">
+          ${linkSearchResults
+            .map(
+              (c) => `
+            <li>
+              <span>${esc(c.name)} <span class="helper-text">(ID: ${esc(c.id)})</span></span>
+              <button class="btn btn-teal" data-action="link-from-search" data-owner="${esc(linkSearchedOwner)}" data-id="${esc(c.id)}">vincular</button>
+            </li>`
+            )
+            .join("")}
+        </ul>`
+            : ""
+        }
+        <button class="btn-link" type="button" data-action="toggle-manual-link" style="margin-top:6px;">${showManualLink ? "ocultar vínculo manual" : "prefiro digitar o ID manualmente"}</button>
+        ${
+          showManualLink
+            ? `
+        <div style="display:flex;gap:8px;margin:8px 0;">
+          <input type="text" id="link-owner-input-manual" placeholder="username do jogador" value="${esc(linkOwnerInput)}" />
           <input type="text" id="link-charid-input" placeholder="ID do personagem" value="${esc(linkCharIdInput)}" style="width:140px;" />
         </div>
-        <button class="btn btn-teal" data-action="do-link-character">Vincular</button>
+        <button class="btn btn-teal" data-action="do-link-character">Vincular</button>`
+            : ""
+        }
         `
             : ""
         }
@@ -2062,6 +2094,12 @@ async function openCampaignDashboardScreen(slug) {
   bulkMonsterError = "";
   campaignDescSaving = false;
   campaignDescSaved = false;
+  linkOwnerInput = "";
+  linkCharIdInput = "";
+  linkSearchResults = [];
+  linkSearchedOwner = "";
+  linkSearchError = "";
+  showManualLink = false;
   render();
   try {
     currentCampaign = await loadCampaignDashboard(slug);
@@ -2071,8 +2109,58 @@ async function openCampaignDashboardScreen(slug) {
   render();
 }
 
-async function handleLinkCharacter() {
+// Busca os personagens de um usuário pelo username, sem precisar que o
+// jogador descubra e passe o ID manualmente — o mestre só clica no resultado.
+async function searchLinkableCharacters() {
   const ownerInput = document.getElementById("link-owner-input");
+  const owner = ownerInput ? ownerInput.value.trim() : "";
+  if (!owner) return;
+  linkSearchError = "";
+  linkSearchLoading = true;
+  linkSearchResults = [];
+  linkSearchedOwner = owner;
+  render();
+  try {
+    const files = await listDirectory(`users/${owner}/characters`);
+    const jsonFiles = (files || []).filter((f) => f.name && f.name.endsWith(".json"));
+    if (jsonFiles.length === 0) {
+      linkSearchError = `Nenhum personagem encontrado para "${owner}". Confira se o username do GitHub está certo e se o jogador já criou algum personagem.`;
+    }
+    const withNames = await Promise.all(
+      jsonFiles.map(async (f) => {
+        const id = f.name.replace(".json", "");
+        try {
+          const res = await readJsonFile(f.path);
+          return { id, name: res?.data?.basic?.name || id };
+        } catch {
+          return { id, name: id };
+        }
+      })
+    );
+    linkSearchResults = withNames;
+  } catch (err) {
+    linkSearchError = "Falha ao buscar personagens: " + (err.message || err);
+  }
+  linkSearchLoading = false;
+  render();
+}
+
+async function handleLinkFromSearch(owner, characterId) {
+  try {
+    await linkCharacterToCampaign(currentCampaignSlug, owner, characterId);
+    currentCampaign = await loadCampaignDashboard(currentCampaignSlug);
+    linkSearchResults = [];
+    linkSearchedOwner = "";
+    linkOwnerInput = "";
+    campaignDashError = "";
+  } catch (err) {
+    campaignDashError = err.message || String(err);
+  }
+  render();
+}
+
+async function handleLinkCharacter() {
+  const ownerInput = document.getElementById("link-owner-input-manual");
   const idInput = document.getElementById("link-charid-input");
   const owner = ownerInput ? ownerInput.value.trim() : "";
   const characterId = idInput ? idInput.value.trim() : "";
@@ -2338,6 +2426,21 @@ function attachEvents() {
 
   document.querySelectorAll("[data-action='back-to-campaigns']").forEach((btn) => {
     btn.addEventListener("click", goToCampaigns);
+  });
+
+  document.querySelectorAll("[data-action='search-linkable-characters']").forEach((btn) => {
+    btn.addEventListener("click", searchLinkableCharacters);
+  });
+
+  document.querySelectorAll("[data-action='link-from-search']").forEach((btn) => {
+    btn.addEventListener("click", () => handleLinkFromSearch(btn.dataset.owner, btn.dataset.id));
+  });
+
+  document.querySelectorAll("[data-action='toggle-manual-link']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      showManualLink = !showManualLink;
+      render();
+    });
   });
 
   document.querySelectorAll("[data-action='do-link-character']").forEach((btn) => {
@@ -2910,7 +3013,7 @@ async function init() {
   } else {
     clearAuth();
     screen = "login";
-    loginError = "Sua sessão expirou. Faça login novamente!";
+    loginError = "Sua sessão expirou. Faça login novamente.";
     render();
   }
 }
