@@ -30,33 +30,29 @@
 }
 
 [data-theme="dark"] {
-  /* Paleta medieval escura: masmorra à luz de tocha — madeira, couro e brasa. /
+  /* Fundo: quase preto, com calor de madeira/couro envelhecido, nada de neon. */
   --bg: #080604;
   --bg-alt: #0d0a07;
   --ink: #080604;
-  --paper: #15100b;               / "pergaminho" escuro — cartão principal /
-  --paper-dark: #1c1611;          / superfície secundária — abas, listas /
+  --paper: #15100b;               /* couro/madeira escura */
+  --paper-dark: #1c1611;          /* superfície secundária (abas, listas) */
   --surface-raised: #241c14;
-  --ink-text: #e6d9b8;            / tinta clara sobre madeira escura /
+  --ink-text: #e6d9b8;            /* texto cor pergaminho */
   --text-dim: #8f836a;
-
-  --stamp: #7a1f1f;               / vermelho vivo — perigo, crítico, HP /
+ 
+  --stamp: #7a1f1f;               /* sangue seco — perigo, crítico, HP */
   --stamp-glow: rgba(122, 31, 31, 0.5);
-  --teal: #4a6b45;                / verde musgo claro — MP, ações neutras /
+  --teal: #4a6b45;                /* verdigris/pátina de bronze — MP, ações neutras */
   --teal-glow: rgba(74, 107, 69, 0.4);
-  --violet: #8a6a2f;              / couro claro/bronze — destaques, abas ativas /
+  --violet: #8a6a2f;               /* bronze/ouro envelhecido — destaques, abas ativas */
   --violet-glow: rgba(138, 106, 47, 0.45);
-  --gold: #b8922c;                / ouro à luz de tocha — XP, atenção /
+  --gold: #b8922c;                /* ouro antigo — XP, atenção */
   --gold-glow: rgba(184, 146, 44, 0.4);
-  --crit: #3d8b40;                / verde — sucesso crítico */
+  --crit: #3d8b40;                /* verde musgo — sucesso crítico */
   --crit-glow: rgba(61, 139, 64, 0.45);
-
+ 
   --border: rgba(184, 146, 90, 0.16);
   --border-strong: rgba(184, 146, 90, 0.32);
-
-  --bg-tint-1: rgba(217, 165, 33, 0.10);
-  --bg-tint-2: rgba(94, 148, 104, 0.08);
-  --bg-tint-3: rgba(201, 72, 77, 0.08);
 }
 
 body {
