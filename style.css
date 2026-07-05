@@ -1663,8 +1663,8 @@ button:disabled {
 
 .monster-card-footer {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
@@ -1677,7 +1677,12 @@ button:disabled {
   letter-spacing: 0.3px;
 }
 
-.monster-card-owner-actions { display: flex; gap: 10px; }
+.monster-card-owner-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
 
 @media (max-width: 640px) {
   .grid-3 { grid-template-columns: 1fr; }
