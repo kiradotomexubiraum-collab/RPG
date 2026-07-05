@@ -1342,16 +1342,16 @@ function renderBestiary() {
           </div>
           ${m.description ? `<p class="monster-card-desc">${esc(m.description)}</p>` : `<p class="monster-card-desc helper-text">Sem descrição.</p>`}
           <div class="monster-card-footer">
-            <span class="monster-card-owner">criado por ${esc(m.createdBy || "?")}</span>
             ${
               isOwner
                 ? `
-              <span class="monster-card-owner-actions">
+              <div class="monster-card-owner-actions">
                 <button class="btn" data-action="edit-monster" data-id="${esc(m.id)}">editar</button>
                 <button class="btn danger" data-action="do-delete-monster" data-id="${esc(m.id)}">apagar</button>
-              </span>`
+              </div>`
                 : ""
             }
+            <span class="monster-card-owner">criado por ${esc(m.createdBy || "?")}</span>
           </div>
         </div>
       </div>`;
