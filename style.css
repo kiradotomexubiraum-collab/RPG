@@ -368,7 +368,7 @@ textarea { resize: vertical; }
 .btn-teal:hover { box-shadow: 0 0 18px var(--teal-glow); }
 
 .btn-stamp {
-  background: rgba(122, 31, 31, 0.12);
+  background: rgba(123, 31, 31, 0.12);
   border-color: var(--stamp);
   color: var(--stamp);
 }
