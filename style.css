@@ -642,6 +642,15 @@ textarea { resize: vertical; }
 .skill-row .dice-btn { width: 22px; height: 22px; }
 .skill-row .dice-btn svg { width: 13px; height: 13px; }
 .skill-row .trash-btn svg { width: 14px; height: 14px; }
+.skill-row .trash-btn,
+.skill-row .trash-btn-spacer {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 
 .card-box {
   background: var(--paper-dark);
@@ -1855,3 +1864,69 @@ button:disabled {
   transition: opacity 0.15s;
 }
 .tab-btn.active::before { opacity: 0.9; }
+
+/* =========================================================================
+   Compatibilidade com celular (mobile). Este bloco só entra em telas
+   estreitas — nada aqui afeta o layout em telas de computador.
+   ========================================================================= */
+@media (max-width: 600px) {
+  html, body { overflow-x: hidden; }
+
+  .center-box { padding: 1.25rem 0.75rem; }
+  .login-card { padding: 1.5rem 1.1rem; }
+
+  .theme-toggle-btn {
+    position: static;
+    display: block;
+    margin: 0 auto 14px;
+    width: fit-content;
+  }
+
+  /* Perícias: permite quebrar em duas linhas se não couber tudo numa só */
+  .skill-row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .skill-name-wrap { flex-basis: 100%; }
+  .skill-row-controls { flex-basis: 100%; justify-content: flex-start; }
+  .skill-row-controls .training-select { width: 100px; }
+
+  /* Campos de item e ataques: permitem quebrar linha em vez de espremer */
+  .item-field-row,
+  .attack-row {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .item-field-row select.item-field-kind,
+  .item-field-row select.item-field-skill,
+  .attack-skill-select {
+    width: auto;
+    flex: 1 1 120px;
+  }
+  .item-field-row .item-field-label,
+  .item-field-row .item-field-value {
+    flex-basis: 100%;
+  }
+  .attack-row input[data-field="name"] { flex-basis: 100%; }
+
+  .item-type-row { flex-wrap: wrap; row-gap: 6px; }
+
+  /* Abas: permitem rolagem horizontal em vez de espremer o texto */
+  .nav-tabs,
+  .tabs-inline {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .nav-tabs-wrap { flex-wrap: wrap; }
+
+  /* Barras de rolagem de dado: garante que não estourem a largura da tela */
+  .dice-stage { flex-wrap: wrap; }
+  .toast { min-width: 0; width: 92vw; }
+
+  .card-box-header input[type="text"] { font-size: 15px; }
+}
+
+@media (max-width: 380px) {
+  .skill-row-controls .buff { width: 34px; }
+  .skill-input { font-size: 11px; }
+}
