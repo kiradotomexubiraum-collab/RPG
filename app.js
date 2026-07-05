@@ -1,5 +1,32 @@
 // ---------- Estado global ----------
 let screen = "loading"; // loading | login | list | sheet
+
+// ---------- Tema (claro/escuro) ----------
+// Salvo no localStorage do navegador, então persiste sem precisar mudar toda vez.
+const THEME_KEY = "rpg_theme";
+
+function getTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) || "light";
+  } catch {
+    return "light";
+  }
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+}
+
+function toggleTheme() {
+  const next = getTheme() === "dark" ? "light" : "dark";
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {}
+  applyTheme(next);
+  render();
+}
+
+applyTheme(getTheme());
 let character = null;
 let currentPath = null;
 let currentSha = null;
@@ -46,7 +73,7 @@ let newMonsterFormError = "";
 let editingMonsterId = null; // id do monstro do bestiário em edição (só o dono pode editar)
 let editMonsterFormError = "";
 
-let activeTab = "basic";
+let activeTab = "class";
 let toast = null;
 let classConfirm = false;
 let showHistory = false;
@@ -63,6 +90,20 @@ let campaignHistoryLoading = false;
 let campaignHistoryEntries = [];
 
 let monsterFormError = "";
+
+// ---------- Livro do sistema (arquivo único, upload livre por enquanto) ----------
+let systemBookMeta = null;
+let systemBookMetaSha = null;
+let systemBookLoading = false;
+let systemBookUploading = false;
+let systemBookError = "";
+
+function formatFileSize(bytes) {
+  if (bytes === undefined || bytes === null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function uid() {
   return Math.random().toString(36).slice(2, 8);
@@ -95,6 +136,19 @@ const OFFICIAL_SKILLS = [
 ];
 const MANDATORY_SKILLS = ["Luta", "Pontaria", "Magia"];
 
+// Tipos de item: define se ele sincroniza com a área de Ataques.
+const ITEM_TYPES = [
+  { value: "equipavel", label: "Equipável" },
+  { value: "arma", label: "Arma" },
+  { value: "utilizavel", label: "Utilizável" },
+];
+
+// Tipos de campo livre que um item pode ter.
+const ITEM_FIELD_KINDS = [
+  { value: "text", label: "Campo livre (texto)" },
+  { value: "skillBuff", label: "Buff de perícia" },
+];
+
 // Treinamento: Destreinado (+0), Treinado (+5), Veterano (+10), Expert (+15).
 const TRAINING_LEVELS = [
   { value: 0, label: "Destreinado" },
@@ -104,7 +158,54 @@ const TRAINING_LEVELS = [
 ];
 
 function skillBonus(skill) {
-  return Number(skill.training || 0) + Number(skill.buff || 0);
+  return Number(skill.training || 0) + Number(skill.buff || 0) + itemBuffForSkill(skill.id);
+}
+
+// Soma todos os buffs de perícia concedidos por campos de itens (tipo "Buff de perícia")
+// vinculados à perícia informada. Um item pode ter vários campos, e vários itens
+// podem dar buff na mesma perícia — todos são somados.
+function itemBuffForSkill(skillId) {
+  if (!character || !character.items) return 0;
+  let total = 0;
+  character.items.forEach((it) => {
+    (it.fields || []).forEach((f) => {
+      if (f.kind === "skillBuff" && f.skillId === skillId) {
+        total += Number(f.value || 0);
+      }
+    });
+  });
+  return total;
+}
+
+// Mantém o ataque vinculado a um item do tipo "Arma" sempre em dia: cria o
+// ataque na primeira vez, atualiza nome/dado/crítico quando o item muda, e
+// remove o ataque se o item deixar de ser uma arma.
+function syncItemAttack(item) {
+  if (item.type !== "arma") {
+    if (item.linkedAttackId) {
+      character.attacks = character.attacks.filter((a) => a.id !== item.linkedAttackId);
+      item.linkedAttackId = null;
+    }
+    return;
+  }
+  let attack = character.attacks.find((a) => a.id === item.linkedAttackId);
+  if (!attack) {
+    attack = {
+      id: uid(),
+      name: item.name,
+      dice: item.attackRoll || "1d6",
+      critRange: item.critRange || "20",
+      critMultiplier: item.critMultiplier || "2",
+      skillId: null,
+    };
+    character.attacks.push(attack);
+    item.linkedAttackId = attack.id;
+  } else {
+    attack.name = item.name;
+    attack.dice = item.attackRoll || attack.dice;
+    attack.critRange = item.critRange || attack.critRange;
+    attack.critMultiplier = item.critMultiplier || attack.critMultiplier;
+  }
 }
 
 function emptyCharacter() {
@@ -119,7 +220,7 @@ function emptyCharacter() {
   return {
     basic: { name: "Investigador Sem Nome", photoUrl: "", age: "", weight: "", height: "", financialStatus: "Estável" },
     classInfo: { skipped: false, name: "", fields: [], notes: "" },
-    resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20, xp: 0, gold: 0 },
+    resources: { level: 1, hpCurrent: 20, hpMax: 20, mpCurrent: 20, mpMax: 20, xp: 0, gold: 0, temperature: 37, temperatureMax: 42 },
     skills,
     abilities: [],
     items: [],
@@ -157,10 +258,27 @@ function normalizeCharacter(character) {
     if (a.skillId === undefined) a.skillId = null;
   });
 
+  if (!character.items) character.items = [];
+  character.items.forEach((it) => {
+    if (!it.type) it.type = "equipavel";
+    if (!it.fields) it.fields = [];
+    if (it.linkedAttackId === undefined) it.linkedAttackId = null;
+    if (it.attackRoll === undefined) it.attackRoll = "";
+    if (it.critRange === undefined) it.critRange = "";
+    if (it.critMultiplier === undefined) it.critMultiplier = "2";
+  });
+
   if (!character.rollHistory) character.rollHistory = [];
 
   if (!character.classInfo) character.classInfo = { skipped: false, name: "", fields: [], notes: "" };
   if (character.classInfo.notes === undefined) character.classInfo.notes = "";
+
+  if (character.resources && character.resources.temperature === undefined) {
+    character.resources.temperature = 37;
+  }
+  if (character.resources && character.resources.temperatureMax === undefined) {
+    character.resources.temperatureMax = 42;
+  }
 
   return character;
 }
@@ -476,10 +594,7 @@ async function unlinkCharacterFromCampaign(slug, ownerUsername, characterId) {
 }
 
 const TABS = [
-  { id: "basic", label: "Básico", icon: "user" },
   { id: "class", label: "Classe", icon: "layers" },
-  { id: "resources", label: "Recursos", icon: "heart" },
-  { id: "skills", label: "Perícias", icon: "sparkles" },
   { id: "abilities", label: "Habilidades", icon: "wand" },
   { id: "items", label: "Itens", icon: "backpack" },
   { id: "attacks", label: "Ataques", icon: "swords" },
@@ -496,7 +611,7 @@ const ICONS = {
   dice: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1" fill="currentColor"/><circle cx="16" cy="8" r="1" fill="currentColor"/><circle cx="8" cy="16" r="1" fill="currentColor"/><circle cx="16" cy="16" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>',
   trash: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
   plus: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>',
-  sigil: '<svg width="46" height="46" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="24" cy="24" r="19"/><circle cx="24" cy="24" r="12"/><path d="M24 5v14M24 29v14M5 24h14M29 24h14M10.8 10.8l9.9 9.9M27.3 27.3l9.9 9.9M37.2 10.8l-9.9 9.9M20.7 27.3l-9.9 9.9"/><circle cx="24" cy="24" r="3" fill="currentColor" stroke="none"/></svg>',
+  image: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
 };
 
 // ---------- Rolagem de dados ----------
@@ -528,95 +643,87 @@ function parseCritThreshold(critRange) {
   return Math.min(...parts);
 }
 
-// ---------- Efeitos sonoros (sintetizados via Web Audio, sem arquivos externos) ----------
-// Tocam só no navegador de quem rolou o dado — nunca são compartilhados.
-function playTone(steps) {
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const now = ctx.currentTime;
-    steps.forEach((step, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = step.type || "triangle";
-      const start = now + (step.at || 0);
-      osc.frequency.setValueAtTime(step.freqStart, start);
-      osc.frequency.linearRampToValueAtTime(step.freqEnd, start + step.duration);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.linearRampToValueAtTime(step.volume || 0.16, start + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + step.duration);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(start);
-      osc.stop(start + step.duration + 0.02);
-    });
-    setTimeout(() => ctx.close(), (steps[steps.length - 1].at + steps[steps.length - 1].duration) * 1000 + 200);
-  } catch (e) {
-    // Áudio bloqueado pelo navegador (sem interação prévia) — silencioso, sem quebrar a rolagem.
-  }
-}
-
-function playCritSound() {
-  // Acorde ascendente curto — soa como um "sino" de sucesso.
-  playTone([
-    { freqStart: 440, freqEnd: 660, duration: 0.14, type: "triangle", at: 0, volume: 0.16 },
-    { freqStart: 660, freqEnd: 990, duration: 0.22, type: "triangle", at: 0.1, volume: 0.14 },
-  ]);
-}
-
-function playFumbleSound() {
-  // Zumbido descendente e discordante — soa como algo dando errado.
-  playTone([
-    { freqStart: 200, freqEnd: 70, duration: 0.35, type: "sawtooth", at: 0, volume: 0.14 },
-    { freqStart: 140, freqEnd: 55, duration: 0.3, type: "square", at: 0.05, volume: 0.06 },
-  ]);
-}
-
 function doRoll(dice, bonus, label, critRange, critMultiplier) {
-  toast = { rolling: true, label };
-  render();
+  const base = rollDice(dice);
+  if (!base) {
+    toast = { label: "Erro", roll: `Notação inválida: "${dice}"`, total: null };
+    render();
+    setTimeout(() => { toast = null; render(); }, 3000);
+    return;
+  }
+  const result = bonus ? { ...base, mod: base.mod + bonus, total: base.total + bonus } : base;
 
-  setTimeout(() => {
-    const base = rollDice(dice);
-    if (!base) {
-      toast = { label: "Erro", roll: `Notação inválida: "${dice}"`, total: null };
+  const threshold = parseCritThreshold(critRange);
+  const multiplier = parseFloat(critMultiplier) || 1;
+  const isCrit = threshold !== null && result.rolls.some((r) => r >= threshold);
+  const isFumble = !isCrit && isNat1D20(base);
+
+  let finalTotal = result.total;
+  let critNote = "";
+  if (isCrit && multiplier > 1) {
+    const diceSum = result.rolls.reduce((a, b) => a + b, 0);
+    finalTotal = diceSum * multiplier + result.mod;
+    critNote = ` — CRÍTICO ×${multiplier}!`;
+  } else if (isCrit) {
+    critNote = " — CRÍTICO!";
+  } else if (isFumble) {
+    critNote = " — FALHA CRÍTICA!";
+  }
+
+  const finalToast = {
+    label: label + critNote,
+    roll: `${result.notation} → [${result.rolls.join(", ")}] ${result.mod >= 0 ? "+" : ""}${result.mod}`,
+    total: finalTotal,
+    crit: isCrit,
+    fumble: isFumble,
+    sides: base.sides,
+    diceResults: base.rolls,
+  };
+  animateRoll(label, base.sides, base.count, finalToast);
+}
+
+// Anima a rolagem (números "girando" por um instante, só na tela de quem rolou)
+// antes de revelar o resultado final — inclusive o flash de crítico/falha crítica.
+function animateRoll(baseLabel, sides, diceCount, finalToast) {
+  let spins = 0;
+  const maxSpins = 7;
+  const step = () => {
+    spins++;
+    if (spins > maxSpins) {
+      toast = finalToast;
+      pushRollHistory(finalToast);
       render();
-      setTimeout(() => { toast = null; render(); }, 3000);
+      setTimeout(() => { toast = null; render(); }, 4500);
       return;
     }
-    const result = bonus ? { ...base, mod: base.mod + bonus, total: base.total + bonus } : base;
-
-    const threshold = parseCritThreshold(critRange);
-    const multiplier = parseFloat(critMultiplier) || 1;
-    const isCrit = threshold !== null && result.rolls.some((r) => r >= threshold);
-    const isFumble = !isCrit && isNat1D20(base);
-
-    let finalTotal = result.total;
-    let critNote = "";
-    if (isCrit && multiplier > 1) {
-      const diceSum = result.rolls.reduce((a, b) => a + b, 0);
-      finalTotal = diceSum * multiplier + result.mod;
-      critNote = ` — CRÍTICO ×${multiplier}!`;
-    } else if (isCrit) {
-      critNote = " — CRÍTICO!";
-    } else if (isFumble) {
-      critNote = " — FALHA CRÍTICA!";
-    }
-
-    if (isCrit) playCritSound();
-    else if (isFumble) playFumbleSound();
-
-    toast = {
-      label: label + critNote,
-      roll: `${result.notation} → [${result.rolls.join(", ")}] ${result.mod >= 0 ? "+" : ""}${result.mod}`,
-      total: finalTotal,
-      crit: isCrit,
-      fumble: isFumble,
-    };
-    pushRollHistory(toast);
+    const fake = Array.from({ length: diceCount || 1 }, () => 1 + Math.floor(Math.random() * (sides || 20)));
+    toast = { rolling: true, label: baseLabel, sides: sides || 20, fakeValues: fake, total: null };
     render();
-    setTimeout(() => { toast = null; render(); }, 4500);
-  }, 550);
+    setTimeout(step, 70);
+  };
+  step();
+}
+
+// Gera os pontos de um polígono regular com N lados (visual do dado —
+// quanto mais lados o dado tiver, mais "arredondado" o polígono fica).
+function diceShapePoints(sides) {
+  const n = Math.max(3, Math.min(sides || 20, 20));
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    const x = 50 + 44 * Math.cos(angle);
+    const y = 50 + 44 * Math.sin(angle);
+    pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+  return pts.join(" ");
+}
+
+function renderDie(sides, value, extraClass) {
+  return `
+    <div class="die-shape ${extraClass || ""}">
+      <svg viewBox="0 0 100 100"><polygon points="${diceShapePoints(sides)}" /></svg>
+      <span class="die-value">${value}</span>
+    </div>`;
 }
 
 // Guarda as últimas rolagens na própria ficha (persistida no GitHub junto com o resto),
@@ -677,25 +784,50 @@ function doAttackTest(attack) {
     dmgTotal = 0;
   }
 
-  if (isCrit) playCritSound();
-  else if (isFumble) playFumbleSound();
-
-  toast = {
+  const finalToast = {
     label: `Ataque: ${attack.name}${critNote}`,
     roll: `Teste (${skill.name}): 1d20 → [${testRoll.rolls.join(", ")}] ${testBonus >= 0 ? "+" : ""}${testBonus} = ${testTotal}  |  Dano: ${dmgRoll.notation} → [${dmgRoll.rolls.join(", ")}]`,
     total: dmgTotal,
     crit: isCrit,
     fumble: isFumble,
+    sides: 20,
+    diceResults: testRoll.rolls,
   };
-  pushRollHistory(toast);
-  render();
-  setTimeout(() => { toast = null; render(); }, 4500);
+  animateRoll(`Ataque: ${attack.name}`, 20, 1, finalToast);
+}
+
+// Campo reutilizável de "anexar imagem" por upload de arquivo (em vez de colar
+// uma URL) — usado nos formulários de monstro. idPrefix vira o id do input
+// escondido que guarda o data URL; os handlers ficam em attachEvents().
+function renderImageUploadField(idPrefix, currentUrl) {
+  return `
+    <div class="image-upload-row">
+      <label class="image-upload-preview" for="${idPrefix}-file">
+        ${currentUrl ? `<img src="${esc(currentUrl)}" alt="">` : ICONS.image}
+      </label>
+      <input type="file" accept="image/*" id="${idPrefix}-file" data-image-target="${idPrefix}" hidden />
+      <input type="hidden" id="${idPrefix}" value="${esc(currentUrl || "")}" />
+      <label for="${idPrefix}-file" class="btn-link image-upload-label">${currentUrl ? "trocar imagem" : "escolher imagem"}</label>
+    </div>`;
 }
 
 function esc(str) {
   const div = document.createElement("div");
   div.textContent = str ?? "";
   return div.innerHTML;
+}
+
+// Lê um arquivo de imagem escolhido pelo usuário e devolve como data URL —
+// método mais acessível que pedir pra colar uma URL (não exige hospedar a
+// imagem em outro site antes). Fica salvo como texto dentro do próprio JSON.
+function readImageFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve("");
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Não foi possível ler a imagem."));
+    reader.readAsDataURL(file);
+  });
 }
 
 // ---------- Salvamento automático ----------
@@ -752,11 +884,11 @@ function renderLoading() {
 
 function renderLogin() {
   return `
-    <div class="center-box">
+    <div class="center-box login-screen">
+      <button class="theme-toggle-btn" data-action="toggle-theme" title="Alternar modo claro/escuro">${getTheme() === "dark" ? "☀ Modo claro" : "🌙 Modo escuro"}</button>
       <div class="login-card">
-        <div class="login-sigil">${ICONS.sigil || ""}</div>
-        <div class="eyebrow" style="text-align:center;">Arquivo da Ordem</div>
-        <h1 class="char-name" style="margin-bottom:1rem;text-align:center;">Acesso Restrito</h1>
+        <div class="eyebrow">Arquivo da Ordem</div>
+        <h1 class="char-name" style="margin-bottom:1rem;">Acesso Restrito</h1>
         <ol class="login-steps">
           <li>Acesse <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noreferrer">criar novo token</a></li>
           <li>Repository access → apenas o repositório de dados (ex: <code>${esc(GITHUB_CONFIG.owner)}/${esc(GITHUB_CONFIG.repo)}</code>)</li>
@@ -777,10 +909,14 @@ function renderLogin() {
 
 function renderNavTabs(active) {
   return `
-    <div class="nav-tabs">
-      <button class="nav-tab ${active === "characters" ? "active" : ""}" data-action="nav-characters">Meus Personagens</button>
-      <button class="nav-tab ${active === "campaigns" ? "active" : ""}" data-action="nav-campaigns">Campanhas</button>
-      <button class="nav-tab ${active === "monsters" ? "active" : ""}" data-action="nav-monsters">Monstros</button>
+    <div class="nav-tabs-wrap">
+      <div class="nav-tabs">
+        <button class="nav-tab ${active === "characters" ? "active" : ""}" data-action="nav-characters">Meus Personagens</button>
+        <button class="nav-tab ${active === "campaigns" ? "active" : ""}" data-action="nav-campaigns">Campanhas</button>
+        <button class="nav-tab ${active === "monsters" ? "active" : ""}" data-action="nav-monsters">Monstros</button>
+        <button class="nav-tab ${active === "system" ? "active" : ""}" data-action="nav-system">Livro do Sistema</button>
+      </div>
+      <button class="theme-toggle-btn theme-toggle-btn-inline" data-action="toggle-theme" title="Alternar modo claro/escuro">${getTheme() === "dark" ? "☀" : "🌙"}</button>
     </div>`;
 }
 
@@ -794,7 +930,10 @@ function renderList() {
           <span>${esc(c.name)}</span>
           <span class="char-list-arrow">→</span>
         </button>
-        <button class="btn-copy-id" data-action="copy-id" data-id="${esc(c.id)}">ID: ${esc(c.id)} (copiar)</button>
+        <div class="char-list-item-footer">
+          <button class="btn-copy-id" data-action="copy-id" data-id="${esc(c.id)}">ID: ${esc(c.id)} (copiar)</button>
+          <button class="btn-link danger" data-action="delete-character" data-path="${esc(c.path)}" data-sha="${esc(c.sha || "")}" data-name="${esc(c.name)}">apagar personagem</button>
+        </div>
       </div>`
     )
     .join("");
@@ -901,7 +1040,7 @@ function renderCampaignDashboard() {
         <li class="char-card" style="border-color:${entry.color};">
           <div class="char-card-top">
             <span><strong>${esc(entry.characterOwner)}</strong> — ${esc(entry.characterId)} <span class="helper-text">(não encontrado)</span></span>
-            ${isGm ? `<button class="btn-link danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
+            ${isGm ? `<button class="btn danger" data-action="unlink-character" data-owner="${esc(entry.characterOwner)}" data-id="${esc(entry.characterId)}">remover</button>` : ""}
           </div>
         </li>`;
       }
@@ -1020,10 +1159,8 @@ function renderCampaignDashboard() {
           <input type="number" id="monster-hp-input" placeholder="HP" style="width:80px;" />
           <input type="number" id="monster-mp-input" placeholder="MP" style="width:80px;" />
         </div>
-        <div class="monster-form" style="margin-top:6px;">
-          <input type="text" id="monster-image-input" placeholder="URL da imagem (opcional)" style="flex:1;" />
-        </div>
-        <textarea rows="2" id="monster-desc-input" placeholder="Descrição (opcional)" style="margin-top:6px;width:100%;"></textarea>
+        ${renderImageUploadField("monster-image-input", "")}
+        <textarea rows="2" id="monster-desc-input" placeholder="Descrição (aparência, comportamento, fraquezas...) — opcional"></textarea>
         <button class="btn btn-teal" data-action="do-add-monster" style="margin-top:6px;">+ criar monstro</button>
         <button class="btn-add" data-action="toggle-bulk-monster-add" style="margin-top:8px;">${ICONS.plus} adicionar em massa</button>
         ${
@@ -1106,7 +1243,7 @@ function renderBestiary() {
               <input type="number" id="edit-monster-hp-${m.id}" placeholder="HP" value="${esc(String(m.hp ?? 0))}" />
               <input type="number" id="edit-monster-mp-${m.id}" placeholder="MP" value="${esc(String(m.mp ?? 0))}" />
             </div>
-            <input type="text" id="edit-monster-image-${m.id}" placeholder="URL da imagem (opcional)" value="${esc(m.imageUrl || "")}" />
+            ${renderImageUploadField(`edit-monster-image-${m.id}`, m.imageUrl || "")}
             <textarea rows="3" id="edit-monster-desc-${m.id}" placeholder="Descrição...">${esc(m.description || "")}</textarea>
             ${editMonsterFormError ? `<p class="login-error">${esc(editMonsterFormError)}</p>` : ""}
             <div style="display:flex;gap:8px;margin-top:6px;">
@@ -1137,8 +1274,8 @@ function renderBestiary() {
               isOwner
                 ? `
               <span class="monster-card-owner-actions">
-                <button class="btn-link" data-action="edit-monster" data-id="${esc(m.id)}">editar</button>
-                <button class="btn-link danger" data-action="do-delete-monster" data-id="${esc(m.id)}">apagar</button>
+                <button class="btn" data-action="edit-monster" data-id="${esc(m.id)}">editar</button>
+                <button class="btn danger" data-action="do-delete-monster" data-id="${esc(m.id)}">apagar</button>
               </span>`
                 : ""
             }
@@ -1171,7 +1308,7 @@ function renderBestiary() {
             <input type="number" id="new-monster-hp" placeholder="HP" />
             <input type="number" id="new-monster-mp" placeholder="MP" />
           </div>
-          <input type="text" id="new-monster-image" placeholder="URL da imagem (opcional)" />
+          ${renderImageUploadField("new-monster-image", "")}
           <textarea rows="3" id="new-monster-desc" placeholder="Descrição (aparência, comportamento, fraquezas...)"></textarea>
           ${newMonsterFormError ? `<p class="login-error">${esc(newMonsterFormError)}</p>` : ""}
           <div style="display:flex;gap:8px;margin-top:6px;">
@@ -1191,23 +1328,72 @@ function renderBestiary() {
     </div>`;
 }
 
+// ---------- Livro do sistema (aba "Livro do Sistema") ----------
+// Por enquanto só guarda o arquivo em si (PDF, imagem etc.); o conteúdo/uso
+// dentro da ficha (referências, busca etc.) fica pra depois.
+function renderSystemBook() {
+  const user = getStoredUser();
+  const b = systemBookMeta;
+
+  return `
+    <div class="center-box">
+      <div class="login-card" style="max-width:560px;">
+        <div class="eyebrow">Conectado como ${esc(user?.login || "")}</div>
+        ${renderNavTabs("system")}
+        <h1 class="char-name" style="margin-bottom:0.4rem;">Livro do Sistema</h1>
+        <p class="helper-text" style="margin-bottom:14px;">
+          Suba aqui o arquivo do manual/livro de regras do sistema (PDF, imagem etc.) pra ficar
+          disponível pra todo mundo que usa esta ficha. Existe só um arquivo atual — enviar um novo
+          substitui o anterior. O conteúdo em si (texto pesquisável, referências dentro da ficha etc.)
+          é uma etapa futura; por enquanto isso só guarda e disponibiliza o arquivo.
+        </p>
+        ${systemBookError ? `<p class="login-error">${esc(systemBookError)}</p>` : ""}
+
+        ${
+          systemBookLoading
+            ? `<p class="helper-text">Carregando...</p>`
+            : b
+            ? `
+          <div class="monster-item">
+            <span class="monster-name">${esc(b.fileName)}</span>
+            <span class="monster-stats">${esc(formatFileSize(b.sizeBytes))} · enviado por ${esc(b.uploadedBy)} em ${esc(new Date(b.uploadedAt).toLocaleDateString("pt-BR"))}</span>
+          </div>
+          <div style="display:flex;gap:16px;align-items:center;margin:14px 0;">
+            <button class="btn btn-teal" data-action="system-book-download">baixar arquivo</button>
+            <button class="btn-link danger" data-action="system-book-remove">remover</button>
+          </div>`
+            : `<p class="helper-text" style="margin-bottom:14px;">Nenhum arquivo enviado ainda.</p>`
+        }
+
+        <label class="btn btn-teal" style="display:inline-block;cursor:pointer;">
+          ${systemBookUploading ? "enviando..." : b ? "substituir arquivo" : "+ enviar arquivo"}
+          <input type="file" data-action="system-book-upload" hidden ${systemBookUploading ? "disabled" : ""} />
+        </label>
+
+        <button class="btn btn-teal" data-action="logout" style="margin-top:18px;display:block;">Sair</button>
+      </div>
+    </div>`;
+}
+
 // ---------- Conteúdo das abas (idêntico ao protótipo anterior) ----------
 function renderBasic() {
   const b = character.basic;
+  const idMatch = currentPath ? currentPath.match(/characters\/(.+)\.json$/) : null;
+  const shortId = idMatch ? idMatch[1] : "";
   return `
-    <div class="avatar-row">
-      <div class="avatar">${b.photoUrl ? `<img src="${esc(b.photoUrl)}" alt="">` : ICONS.user}</div>
-      <div style="flex:1">
+    <div class="avatar-row" style="align-items:flex-start;">
+      <label class="avatar avatar-upload" style="width:110px;height:110px;font-size:38px;" title="Clique para escolher uma foto do seu dispositivo">
+        ${b.photoUrl ? `<img src="${esc(b.photoUrl)}" alt="">` : ICONS.user}
+        <input type="file" accept="image/*" data-photo-bind="basic.photoUrl" hidden />
+      </label>
+      <div style="flex:1;">
+        ${b.photoUrl ? `<button class="btn-link danger" type="button" data-action="clear-avatar-photo" style="display:block;margin-bottom:6px;">remover foto</button>` : ""}
         <label class="field">
           <span class="field-label">Nome do personagem</span>
           <input type="text" data-bind="basic.name" value="${esc(b.name)}" />
         </label>
       </div>
     </div>
-    <label class="field">
-      <span class="field-label">URL da foto</span>
-      <input type="text" data-bind="basic.photoUrl" value="${esc(b.photoUrl)}" placeholder="https://..." />
-    </label>
     <div class="grid-2">
       <label class="field">
         <span class="field-label">Idade</span>
@@ -1225,7 +1411,8 @@ function renderBasic() {
         <span class="field-label">Altura</span>
         <input type="text" data-bind="basic.height" value="${esc(b.height)}" placeholder="ex: 1,75m" />
       </label>
-    </div>`;
+    </div>
+    ${shortId ? `<button class="btn-copy-id" data-action="copy-id" data-id="${esc(shortId)}">ID: ${esc(shortId)} (copiar)</button>` : ""}`;
 }
 
 function renderClass() {
@@ -1267,12 +1454,12 @@ function renderResources() {
     const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
     const tc = textClass || "";
     return `
-      <div class="bar-block">
+      <div class="bar-block bar-block-compact bar-block-${currentKey}">
         <div class="bar-top">
           <span class="field-label ${tc}" style="margin:0;">${label}</span>
           <span class="${tc}" style="font-family:'Special Elite',monospace;font-size:13px;">${current} / ${max}</span>
         </div>
-        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
+        <div class="bar-track bar-track-compact"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
         <div class="bar-inputs">
           <span>atual</span>
           <input type="number" class="${tc}" data-bind="resources.${currentKey}" data-numeric="true" value="${current}" />
@@ -1287,41 +1474,64 @@ function renderResources() {
   const isMaxLevel = r.level >= MAX_LEVEL;
 
   return `
-    <div class="level-row">
+    <div class="level-row-compact">
       <div>
         <span class="field-label" style="display:block;">Nível ${isMaxLevel ? '<span class="max-tag">MÁX.</span>' : ""}</span>
-        <div class="level-number">${r.level}</div>
+        <div class="level-number-compact">${r.level}</div>
       </div>
-      <button class="btn btn-stamp" data-action="level-down" ${r.level <= 1 ? "disabled" : ""}>Reduzir Nível</button>
+      <label class="gold-inline">
+        <span class="field-label gold-value" style="margin:0;">Gold</span>
+        <input type="number" class="gold-value" data-bind="resources.gold" data-numeric="true" value="${r.gold || 0}" />
+      </label>
+      <button class="btn btn-stamp btn-compact" data-action="level-down" ${r.level <= 1 ? "disabled" : ""}>Reduzir</button>
     </div>
 
-    <div class="bar-block">
+    <div class="bar-block bar-block-compact">
       <div class="bar-top">
         <span class="field-label" style="margin:0;">XP</span>
         <span style="font-family:'Special Elite',monospace;font-size:13px;">${r.xp} / ${xpNeeded}</span>
       </div>
-      <div class="bar-track"><div class="bar-fill" style="width:${xpPct}%;background:#3b6fd6;"></div></div>
+      <div class="bar-track bar-track-compact"><div class="bar-fill" style="width:${xpPct}%;background:#3b6fd6;"></div></div>
       <div class="bar-inputs">
-        <input type="number" id="xp-gain-input" placeholder="quantidade" max="${MAX_XP_PER_ADD}" min="1" style="width:110px;" ${isMaxLevel ? "disabled" : ""} />
-        <button class="btn btn-teal" data-action="add-xp" style="padding:6px 12px;font-size:12px;" ${isMaxLevel ? "disabled" : ""}>+ adicionar XP</button>
+        <input type="number" id="xp-gain-input" placeholder="qtd." max="${MAX_XP_PER_ADD}" min="1" style="width:80px;" ${isMaxLevel ? "disabled" : ""} />
+        <button class="btn btn-teal btn-compact" data-action="add-xp" ${isMaxLevel ? "disabled" : ""}>+ XP</button>
       </div>
-      <p class="helper-text" style="font-size:12px;margin-top:6px;">
-        Máximo de ${MAX_XP_PER_ADD} XP por vez. O personagem sobe quantos níveis forem necessários (até o nível ${MAX_LEVEL}) e mantém o restante automaticamente.
-      </p>
-    </div>
-
-    <div class="bar-block gold-block">
-      <div class="bar-top">
-        <span class="field-label gold-value" style="margin:0;">Gold</span>
-      </div>
-      <input type="number" class="gold-value" data-bind="resources.gold" data-numeric="true" value="${r.gold || 0}" />
     </div>
 
     ${bar("HP", "hpCurrent", "hpMax", "var(--stamp)", "hp-value")}
-    ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}`;
+    ${bar("MP", "mpCurrent", "mpMax", "var(--teal)")}
+    ${bar("Temperatura", "temperature", "temperatureMax", temperatureColor(r.temperature, r.temperatureMax))}
+
+    <p class="helper-text" style="font-size:11px;margin-top:2px;">
+      Máx. ${MAX_XP_PER_ADD} XP por vez · nível máximo ${MAX_LEVEL}.
+    </p>`;
+}
+
+// Cor da barra de temperatura: azul quando está fria, verde na faixa normal
+// e vermelha quando está perto do limite máximo (febre / superaquecimento).
+function temperatureColor(current, max) {
+  if (!max || max <= 0) return "var(--teal)";
+  const pct = (current / max) * 100;
+  if (pct <= 40) return "#3b8fd6";
+  if (pct >= 85) return "var(--stamp)";
+  return "var(--crit)";
 }
 
 function renderSkills() {
+  const header = `
+    <div class="skill-row skill-row-header">
+      <span class="skill-name-wrap">
+        <span class="skill-icon">${ICONS.dice}</span>
+        <span>Perícia</span>
+      </span>
+      <div class="skill-row-controls">
+        <span class="skill-col-label" style="width:92px;">Treino</span>
+        <span class="skill-col-label" style="width:22px;"></span>
+        <span class="skill-col-label" style="width:38px;">Outros</span>
+        <span class="skill-col-label" style="width:22px;"></span>
+        <span class="skill-col-label" style="width:18px;"></span>
+      </div>
+    </div>`;
   const rows = character.skills
     .map((s) => {
       const trainingOptions = TRAINING_LEVELS
@@ -1330,21 +1540,26 @@ function renderSkills() {
       const atExpert = Number(s.training || 0) >= 15;
       return `
       <div class="skill-row" data-id="${s.id}">
-        <input type="text" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
-        <select class="training-select" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
-        <button class="promote-btn" data-action="promote-training" data-id="${s.id}" title="Sobe uma patente de treinamento" ${atExpert ? "disabled" : ""}>▲</button>
-        <input type="number" class="buff" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
-        <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
-        ${s.mandatory ? "" : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
+        <span class="skill-name-wrap">
+          <span class="skill-icon">${ICONS.dice}</span>
+          <input type="text" class="skill-name skill-input" data-list="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" ${s.mandatory ? "readonly title='Perícia usada nos testes de ataque'" : ""} />
+          ${itemBuffForSkill(s.id) ? `<span class="item-buff-badge" title="Bônus vindo de item(ns) equipados">+${itemBuffForSkill(s.id)} item</span>` : ""}
+        </span>
+        <div class="skill-row-controls">
+          <select class="training-select skill-input" data-list="skills" data-id="${s.id}" data-field="training" data-select="true" data-numeric="true" title="Treinamento">${trainingOptions}</select>
+          <button class="promote-btn" data-action="promote-training" data-id="${s.id}" title="Sobe uma patente de treinamento" ${atExpert ? "disabled" : ""}>▲</button>
+          <input type="number" class="buff skill-input" data-list="skills" data-id="${s.id}" data-field="buff" data-numeric="true" value="${s.buff || 0}" title="Buff / bônus situacional" placeholder="buff" />
+          <button class="dice-btn" data-action="roll-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
+          ${s.mandatory ? "" : `<button class="trash-btn" data-action="remove" data-list="skills" data-id="${s.id}">${ICONS.trash}</button>`}
+        </div>
       </div>`;
     })
     .join("");
   return `
-    <p class="helper-text" style="margin-bottom:10px;">
-      Toda perícia rola sempre 1d20 + treinamento + buff. Luta, Pontaria e Magia não podem ser removidas
-      (são usadas nos testes de ataque, na aba Ataques). Use o botão ▲ pra subir uma patente de treinamento
-      (Destreinado → Treinado → Veterano → Expert).
+    <p class="helper-text" style="margin-bottom:6px;">
+      1d20 + treinamento + buff. ▲ sobe patente (Destreinado → Expert).
     </p>
+    ${header}
     ${rows}<button class="btn-add" data-action="add-skill">${ICONS.plus} adicionar perícia</button>`;
 }
 
@@ -1368,26 +1583,70 @@ function renderAbilities() {
   return `${cards}<button class="btn-add" data-action="add-ability">${ICONS.plus} adicionar habilidade</button>`;
 }
 
+function renderItemField(it, f) {
+  const kindOptions = ITEM_FIELD_KINDS
+    .map((k) => `<option value="${k.value}" ${f.kind === k.value ? "selected" : ""}>${k.label}</option>`)
+    .join("");
+
+  if (f.kind === "skillBuff") {
+    const skillOptions = character.skills
+      .map((s) => `<option value="${s.id}" ${f.skillId === s.id ? "selected" : ""}>${esc(s.name)}</option>`)
+      .join("");
+    return `
+      <div class="item-field-row">
+        <select class="item-field-kind" data-item-field="kind" data-item-id="${it.id}" data-field-id="${f.id}" data-select="true" title="Tipo de campo">${kindOptions}</select>
+        <select class="item-field-skill" data-item-field="skillId" data-item-id="${it.id}" data-field-id="${f.id}" data-select="true" title="Perícia que recebe o buff">${skillOptions}</select>
+        <input type="number" class="item-field-value" data-item-field="value" data-item-id="${it.id}" data-field-id="${f.id}" data-numeric="true" value="${f.value || 0}" title="Valor do buff" placeholder="+valor" />
+        <button class="trash-btn" data-action="remove-item-field" data-item-id="${it.id}" data-field-id="${f.id}">${ICONS.trash}</button>
+      </div>`;
+  }
+
+  return `
+    <div class="item-field-row">
+      <select class="item-field-kind" data-item-field="kind" data-item-id="${it.id}" data-field-id="${f.id}" data-select="true" title="Tipo de campo">${kindOptions}</select>
+      <input type="text" class="item-field-label" data-item-field="label" data-item-id="${it.id}" data-field-id="${f.id}" value="${esc(f.label || "")}" placeholder="Nome do campo (ex: dados de efeito)" />
+      <input type="text" class="item-field-value" data-item-field="value" data-item-id="${it.id}" data-field-id="${f.id}" value="${esc(f.value || "")}" placeholder="Valor (ex: 2d6 fogo, alcance 9m...)" />
+      <button class="trash-btn" data-action="remove-item-field" data-item-id="${it.id}" data-field-id="${f.id}">${ICONS.trash}</button>
+    </div>`;
+}
+
 function renderItems() {
   const cards = character.items
-    .map(
-      (it) => `
+    .map((it) => {
+      const isArma = it.type === "arma";
+      const typeOptions = ITEM_TYPES
+        .map((t) => `<option value="${t.value}" ${it.type === t.value ? "selected" : ""}>${t.label}</option>`)
+        .join("");
+      const fieldsHtml = (it.fields || []).map((f) => renderItemField(it, f)).join("");
+      return `
       <div class="card-box" data-id="${it.id}">
         <div class="card-box-header">
           <input type="text" data-list="items" data-id="${it.id}" data-field="name" value="${esc(it.name)}" />
           <button class="trash-btn" data-action="remove" data-list="items" data-id="${it.id}">${ICONS.trash}</button>
         </div>
+        <select class="item-type-select" data-list="items" data-id="${it.id}" data-field="type" data-select="true" title="Tipo do item">${typeOptions}</select>
         <textarea rows="2" data-list="items" data-id="${it.id}" data-field="description" placeholder="Descrição do item...">${esc(it.description)}</textarea>
+        ${isArma ? `
         <div class="item-attack-row">
           <input type="text" data-list="items" data-id="${it.id}" data-field="attackRoll" placeholder="Rolagem de ataque (ex: 1d8+2)" value="${esc(it.attackRoll)}" />
           <input type="text" class="crit" data-list="items" data-id="${it.id}" data-field="critRange" placeholder="Crítico (ex: 20 ou 19-20)" value="${esc(it.critRange)}" />
           <input type="text" data-list="items" data-id="${it.id}" data-field="critMultiplier" placeholder="×2" value="${esc(it.critMultiplier || "")}" style="width:52px;text-align:center;" title="Multiplicador de dano no crítico" />
           ${it.attackRoll ? `<button class="dice-btn" data-action="roll-item" data-id="${it.id}" title="Rolar">${ICONS.dice}</button>` : ""}
         </div>
-      </div>`
-    )
+        <p class="helper-text" style="font-size:11px;margin:2px 0 8px;">Sincronizado automaticamente com um ataque na aba "Ataques".</p>` : ""}
+        <div class="item-fields">${fieldsHtml}</div>
+        <button class="btn-add btn-add-small" data-action="add-item-field" data-id="${it.id}">${ICONS.plus} campo</button>
+      </div>`;
+    })
     .join("");
-  return `${cards}<button class="btn-add" data-action="add-item">${ICONS.plus} adicionar item</button>`;
+  return `
+    <p class="helper-text" style="margin-bottom:10px;">
+      Escolha o tipo do item (Equipável, Arma ou Utilizável). Itens do tipo Arma ganham um ataque
+      correspondente automaticamente na aba "Ataques". Use "+ campo" para adicionar efeitos livres
+      (dados de efeito, habilidades em área etc.) ou um "Buff de perícia", que soma direto no bônus
+      daquela perícia na aba Perícias.
+    </p>
+    ${cards}<button class="btn-add" data-action="add-item">${ICONS.plus} adicionar item</button>`;
 }
 
 function renderAttacks() {
@@ -1419,10 +1678,7 @@ function renderAttacks() {
 
 function renderTabContent() {
   switch (activeTab) {
-    case "basic": return renderBasic();
     case "class": return renderClass();
-    case "resources": return renderResources();
-    case "skills": return renderSkills();
     case "abilities": return renderAbilities();
     case "items": return renderItems();
     case "attacks": return renderAttacks();
@@ -1438,28 +1694,36 @@ function renderSheet() {
     </button>`
   ).join("");
 
-  const idMatch = currentPath ? currentPath.match(/characters\/(.+)\.json$/) : null;
-  const shortId = idMatch ? idMatch[1] : "";
-
   return `
     <div class="sheet">
-      <div class="sheet-header">
-        <div>
-          <div class="eyebrow">Arquivo da Ordem — Ficha de Campo</div>
-          <h1 class="char-name">${esc(character.basic.name)}</h1>
-          <div id="save-indicator" class="save-indicator"></div>
-          ${shortId ? `<button class="btn-copy-id" data-action="copy-id" data-id="${esc(shortId)}" style="margin-top:4px;">ID: ${esc(shortId)} (copiar)</button>` : ""}
+      <div class="sheet-topbar">
+        <div class="sheet-topbar-left">
+          <span class="eyebrow">Arquivo da Ordem</span>
+          <span id="save-indicator" class="save-indicator"></span>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+        <div class="sheet-topbar-right">
           <span class="stamp">confidencial</span>
           <button class="btn btn-teal" data-action="toggle-history">histórico de rolagens</button>
           ${sheetCampaignSlug ? `<button class="btn-back" data-action="back-to-campaign">← voltar para campanha</button>` : ""}
           <button class="btn-back" data-action="back-to-list">← meus personagens</button>
         </div>
       </div>
-      <div class="tabs">${tabsHtml}</div>
       ${sheetReadOnly ? `<div class="readonly-banner">👁 Somente leitura — você não tem permissão para editar a ficha deste personagem.</div>` : ""}
-      <div class="tab-content ${sheetReadOnly ? "readonly-lock" : ""}">${renderTabContent()}</div>
+      <div class="sheet-body ${sheetReadOnly ? "readonly-lock" : ""}">
+        <aside class="sheet-col sheet-col-left">
+          <div class="sidebar-section">${renderBasic()}</div>
+          <div class="sidebar-divider"></div>
+          <div class="sidebar-section">${renderResources()}</div>
+        </aside>
+        <div class="sheet-col sheet-col-mid">
+          <h2 class="col-title">${ICONS.sparkles} Perícias</h2>
+          ${renderSkills()}
+        </div>
+        <div class="sheet-col sheet-col-right">
+          <div class="tabs tabs-inline">${tabsHtml}</div>
+          <div class="tab-content">${renderTabContent()}</div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1503,27 +1767,39 @@ function renderHistoryPanel() {
 function renderToast() {
   if (!toast) return "";
   if (toast.rolling) {
+    const diceHtml = (toast.fakeValues || []).map((v) => renderDie(toast.sides, v, "die-spinning")).join("");
     return `
-      <div class="toast toast-rolling">
-        <div class="toast-label">${esc(toast.label)}</div>
-        <div class="dice-spin">${ICONS.dice}</div>
+      <div class="dice-overlay">
+        <div class="toast rolling">
+          <div class="dice-stage">${diceHtml}</div>
+          <div class="toast-label">${esc(toast.label)}</div>
+        </div>
       </div>`;
   }
-  const flashClass = toast.crit ? "crit-flash" : toast.fumble ? "fumble-flash" : "";
+  const sides = toast.sides || 0;
+  const diceResults = toast.diceResults || [];
+  const hasMax = sides > 1 && diceResults.some((v) => v === sides);
+  const hasMin = sides > 1 && diceResults.some((v) => v === 1);
+  const flashClass = hasMax ? "crit-flash" : hasMin ? "fumble-flash" : "";
   const toastClass = toast.crit ? "toast-crit" : toast.fumble ? "toast-fumble" : "";
+  const diceHtml = diceResults.length
+    ? diceResults.map((v) => renderDie(sides, v, v === sides ? "die-max" : v === 1 ? "die-min" : "")).join("")
+    : "";
   return `
     ${flashClass ? `<div class="${flashClass}"></div>` : ""}
-    <div class="toast ${toastClass}">
-      <div class="toast-label">${esc(toast.label)}</div>
-      <div class="toast-roll">${esc(toast.roll)}</div>
-      ${toast.total !== null ? `<div class="toast-total">${toast.total}</div>` : ""}
+    <div class="dice-overlay">
+      <div class="toast ${toastClass}">
+        ${diceHtml ? `<div class="dice-stage">${diceHtml}</div>` : ""}
+        <div class="toast-label">${esc(toast.label)}</div>
+        <div class="toast-roll">${esc(toast.roll)}</div>
+        ${toast.total !== null ? `<div class="toast-total">${toast.total}</div>` : ""}
+      </div>
     </div>`;
 }
 
 // ---------- Render principal ----------
 function render() {
   const app = document.getElementById("app");
-  document.body.className = screen === "login" ? "screen-login" : "";
   let html = "";
   if (screen === "loading") html = renderLoading();
   else if (screen === "login") html = renderLogin();
@@ -1531,6 +1807,7 @@ function render() {
   else if (screen === "campaigns") html = renderCampaigns();
   else if (screen === "campaign-dashboard") html = renderCampaignDashboard();
   else if (screen === "bestiary") html = renderBestiary();
+  else if (screen === "system") html = renderSystemBook();
   else if (screen === "sheet") html = renderSheet();
 
   app.innerHTML =
@@ -1555,9 +1832,9 @@ async function goToList() {
       jsonFiles.map(async (f) => {
         try {
           const result = await readJsonFile(f.path);
-          return { id: f.name.replace(".json", ""), name: result?.data?.basic?.name || f.name, path: f.path };
+          return { id: f.name.replace(".json", ""), name: result?.data?.basic?.name || f.name, path: f.path, sha: f.sha };
         } catch {
-          return { id: f.name.replace(".json", ""), name: f.name, path: f.path };
+          return { id: f.name.replace(".json", ""), name: f.name, path: f.path, sha: f.sha };
         }
       })
     );
@@ -1566,6 +1843,19 @@ async function goToList() {
     listError = "Não foi possível carregar seus personagens: " + (err.message || err);
   }
   render();
+}
+
+async function deleteCharacter(path, sha, name) {
+  if (!confirm(`Apagar o personagem "${name}"? Essa ação não pode ser desfeita.`)) return;
+  listError = "";
+  try {
+    await deleteFile(path, sha, `chore: apaga personagem ${name}`);
+    characterList = characterList.filter((c) => c.path !== path);
+    render();
+  } catch (err) {
+    listError = "Não foi possível apagar o personagem: " + (err.message || err);
+    render();
+  }
 }
 
 async function goToCampaigns() {
@@ -1617,6 +1907,22 @@ async function goToBestiary() {
     bestiaryError = "Não foi possível carregar o bestiário: " + (err.message || err);
   }
   bestiaryLoading = false;
+  render();
+}
+
+async function goToSystemBook() {
+  screen = "system";
+  systemBookError = "";
+  systemBookLoading = true;
+  render();
+  try {
+    const res = await readJsonFile("system/rulebook_meta.json");
+    systemBookMeta = res ? res.data : null;
+    systemBookMetaSha = res ? res.sha : null;
+  } catch (err) {
+    systemBookError = "Não foi possível carregar o livro do sistema: " + (err.message || err);
+  }
+  systemBookLoading = false;
   render();
 }
 
@@ -1698,7 +2004,7 @@ async function createNewCharacter() {
     currentSha = null;
     const fresh = await readJsonFile(path);
     if (fresh) currentSha = fresh.sha;
-    activeTab = "basic";
+    activeTab = "class";
     screen = "sheet";
     saveStatus = "";
     render();
@@ -1715,7 +2021,7 @@ async function openCharacterCore(path) {
     character = normalizeCharacter(result.data);
     currentSha = result.sha;
     currentPath = path;
-    activeTab = "basic";
+    activeTab = "class";
     screen = "sheet";
     saveStatus = "";
     render();
@@ -1766,6 +2072,10 @@ function attachEvents() {
     });
   }
 
+  document.querySelectorAll("[data-action='toggle-theme']").forEach((btn) => {
+    btn.addEventListener("click", toggleTheme);
+  });
+
   document.querySelectorAll("[data-action='logout']").forEach((btn) => {
     btn.addEventListener("click", () => {
       clearAuth();
@@ -1783,6 +2093,10 @@ function attachEvents() {
     btn.addEventListener("click", () => openCharacter(btn.dataset.path));
   });
 
+  document.querySelectorAll("[data-action='delete-character']").forEach((btn) => {
+    btn.addEventListener("click", () => deleteCharacter(btn.dataset.path, btn.dataset.sha, btn.dataset.name));
+  });
+
   document.querySelectorAll("[data-action='nav-characters']").forEach((btn) => {
     btn.addEventListener("click", goToList);
   });
@@ -1791,6 +2105,102 @@ function attachEvents() {
   });
   document.querySelectorAll("[data-action='nav-monsters']").forEach((btn) => {
     btn.addEventListener("click", goToBestiary);
+  });
+
+  document.querySelectorAll("[data-action='nav-system']").forEach((btn) => {
+    btn.addEventListener("click", goToSystemBook);
+  });
+
+  document.querySelectorAll("[data-action='system-book-upload']").forEach((input) => {
+    input.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      systemBookUploading = true;
+      systemBookError = "";
+      render();
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("Falha ao ler o arquivo."));
+          reader.readAsDataURL(file);
+        });
+        const base64 = dataUrl.split(",")[1];
+        const user = getStoredUser();
+        const existingDataSha = systemBookMeta ? systemBookMeta.dataSha : null;
+        const dataSha = await writeRawFile(
+          "system/rulebook_data",
+          base64,
+          existingDataSha,
+          `feat: atualiza o livro do sistema (${file.name})`
+        );
+        const meta = {
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: user.login,
+          dataSha,
+        };
+        await writeJsonFile(
+          "system/rulebook_meta.json",
+          meta,
+          systemBookMetaSha,
+          `feat: atualiza metadados do livro do sistema (${file.name})`
+        );
+        systemBookMeta = meta;
+        const fresh = await readJsonFile("system/rulebook_meta.json");
+        if (fresh) systemBookMetaSha = fresh.sha;
+      } catch (err) {
+        systemBookError = "Falha ao enviar arquivo: " + (err.message || err);
+      }
+      systemBookUploading = false;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='system-book-download']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        const raw = await readRawFile("system/rulebook_data");
+        if (!raw) return;
+        const byteChars = atob(raw.base64);
+        const byteNumbers = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: (systemBookMeta && systemBookMeta.mimeType) || "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = (systemBookMeta && systemBookMeta.fileName) || "livro-do-sistema";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        systemBookError = "Falha ao baixar arquivo: " + (err.message || err);
+        render();
+      }
+    });
+  });
+
+  document.querySelectorAll("[data-action='system-book-remove']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Remover o arquivo atual do livro do sistema?")) return;
+      try {
+        if (systemBookMeta && systemBookMeta.dataSha) {
+          await deleteFile("system/rulebook_data", systemBookMeta.dataSha, "chore: remove o livro do sistema");
+        }
+        if (systemBookMetaSha) {
+          await deleteFile("system/rulebook_meta.json", systemBookMetaSha, "chore: remove metadados do livro do sistema");
+        }
+        systemBookMeta = null;
+        systemBookMetaSha = null;
+      } catch (err) {
+        systemBookError = "Falha ao remover: " + (err.message || err);
+      }
+      render();
+    });
   });
 
   document.querySelectorAll("[data-action='campaigns-subtab-mine']").forEach((btn) => {
@@ -1848,11 +2258,6 @@ function attachEvents() {
       activeTab = btn.dataset.tab;
       classConfirm = false;
       render();
-      const content = document.querySelector(".tab-content");
-      if (content) {
-        content.classList.add("glitch-in");
-        setTimeout(() => content.classList.remove("glitch-in"), 380);
-      }
     });
   });
 
@@ -1863,11 +2268,58 @@ function attachEvents() {
       for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
       const key = path[path.length - 1];
       obj[key] = input.dataset.numeric ? Number(input.value || 0) : input.value;
-      if (activeTab === "resources") updateResourceBarsInPlace();
-      if (activeTab === "basic" && input.dataset.bind === "basic.name") {
+      if (input.dataset.bind.startsWith("resources.")) updateResourceBarsInPlace();
+      if (input.dataset.bind === "basic.name") {
         document.querySelector(".char-name").textContent = character.basic.name;
       }
       scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-photo-bind]").forEach((fileInput) => {
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      let dataUrl;
+      try {
+        dataUrl = await readImageFileAsDataUrl(file);
+      } catch (err) {
+        return;
+      }
+      const path = fileInput.dataset.photoBind.split(".");
+      let obj = character;
+      for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
+      obj[path[path.length - 1]] = dataUrl;
+      scheduleSave();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='clear-avatar-photo']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      character.basic.photoUrl = "";
+      scheduleSave();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-image-target]").forEach((fileInput) => {
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      let dataUrl;
+      try {
+        dataUrl = await readImageFileAsDataUrl(file);
+      } catch (err) {
+        return;
+      }
+      const targetId = fileInput.dataset.imageTarget;
+      const hiddenInput = document.getElementById(targetId);
+      if (hiddenInput) hiddenInput.value = dataUrl;
+      const preview = document.querySelector(`label.image-upload-preview[for="${fileInput.id}"]`);
+      if (preview) preview.innerHTML = `<img src="${dataUrl}" alt="">`;
+      const label = fileInput.parentElement ? fileInput.parentElement.querySelector(".image-upload-label") : null;
+      if (label) label.textContent = "trocar imagem";
     });
   });
 
@@ -1878,12 +2330,70 @@ function attachEvents() {
       const item = list.find((x) => x.id === input.dataset.id);
       if (!item) return;
       item[input.dataset.field] = input.dataset.numeric ? Number(input.value || 0) : input.value;
+      if (input.dataset.list === "items") {
+        const typeChanged = input.dataset.field === "type";
+        syncItemAttack(item);
+        if (typeChanged) render();
+      }
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-item-field]").forEach((input) => {
+    const eventName = input.dataset.select === "true" ? "change" : "input";
+    input.addEventListener(eventName, () => {
+      const it = character.items.find((x) => x.id === input.dataset.itemId);
+      if (!it) return;
+      const f = (it.fields || []).find((x) => x.id === input.dataset.fieldId);
+      if (!f) return;
+      const field = input.dataset.itemField;
+      const newValue = input.dataset.numeric ? Number(input.value || 0) : input.value;
+      const kindChanged = field === "kind" && newValue !== f.kind;
+      f[field] = newValue;
+      if (kindChanged) {
+        if (newValue === "skillBuff") {
+          f.skillId = character.skills[0]?.id || null;
+          f.value = 0;
+          delete f.label;
+        } else {
+          f.value = "";
+          delete f.skillId;
+        }
+        render();
+      }
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-item-field']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const it = character.items.find((x) => x.id === btn.dataset.id);
+      if (!it) return;
+      if (!it.fields) it.fields = [];
+      it.fields.push({ id: uid(), kind: "text", label: "", value: "" });
+      render();
+      scheduleSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='remove-item-field']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const it = character.items.find((x) => x.id === btn.dataset.itemId);
+      if (!it) return;
+      it.fields = (it.fields || []).filter((f) => f.id !== btn.dataset.fieldId);
+      render();
       scheduleSave();
     });
   });
 
   document.querySelectorAll("[data-action='remove']").forEach((btn) => {
     btn.addEventListener("click", () => {
+      if (btn.dataset.list === "items") {
+        const it = character.items.find((x) => x.id === btn.dataset.id);
+        if (it && it.linkedAttackId) {
+          character.attacks = character.attacks.filter((a) => a.id !== it.linkedAttackId);
+        }
+      }
       character[btn.dataset.list] = character[btn.dataset.list].filter((x) => x.id !== btn.dataset.id);
       render();
       scheduleSave();
@@ -1892,7 +2402,7 @@ function attachEvents() {
 
   bindAction("add-skill", () => character.skills.push({ id: uid(), name: "Nova Perícia", training: 0, buff: 0 }));
   bindAction("add-ability", () => character.abilities.push({ id: uid(), name: "Nova Habilidade", description: "" }));
-  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", attackRoll: "", critRange: "", critMultiplier: "2" }));
+  bindAction("add-item", () => character.items.push({ id: uid(), name: "Novo Item", description: "", type: "equipavel", attackRoll: "", critRange: "", critMultiplier: "2", linkedAttackId: null, fields: [] }));
   bindAction("add-attack", () => character.attacks.push({ id: uid(), name: "Novo Ataque", dice: "1d6", critRange: "20", critMultiplier: "2" }));
 
   bindAction("level-down", () => {
@@ -2249,15 +2759,17 @@ function bindAction(name, handler) {
 
 function updateResourceBarsInPlace() {
   const r = character.resources;
-  const blocks = document.querySelectorAll(".bar-block");
-  const configs = [
-    { current: r.hpCurrent, max: r.hpMax },
-    { current: r.mpCurrent, max: r.mpMax },
-  ];
-  blocks.forEach((block, i) => {
-    const cfg = configs[i];
+  [
+    { selector: ".bar-block-hpCurrent", current: r.hpCurrent, max: r.hpMax },
+    { selector: ".bar-block-mpCurrent", current: r.mpCurrent, max: r.mpMax },
+    { selector: ".bar-block-temperature", current: r.temperature, max: r.temperatureMax, color: temperatureColor(r.temperature, r.temperatureMax) },
+  ].forEach((cfg) => {
+    const block = document.querySelector(cfg.selector);
+    if (!block) return;
     const pct = cfg.max > 0 ? Math.max(0, Math.min(100, (cfg.current / cfg.max) * 100)) : 0;
-    block.querySelector(".bar-fill").style.width = pct + "%";
+    const fill = block.querySelector(".bar-fill");
+    fill.style.width = pct + "%";
+    if (cfg.color) fill.style.background = cfg.color;
     block.querySelector(".bar-top span:last-child").textContent = `${cfg.current} / ${cfg.max}`;
   });
 }
