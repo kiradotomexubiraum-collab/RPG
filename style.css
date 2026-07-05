@@ -1241,6 +1241,25 @@ button:disabled {
   color: var(--ink-text);
 }
 
+.link-search-results {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.link-search-results li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--paper-dark);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 8px 12px;
+  gap: 10px;
+}
+
 .linked-item {
   display: flex;
   justify-content: space-between;
