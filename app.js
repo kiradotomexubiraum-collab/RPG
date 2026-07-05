@@ -829,7 +829,10 @@ function renderList() {
           <span>${esc(c.name)}</span>
           <span class="char-list-arrow">→</span>
         </button>
-        <button class="btn-copy-id" data-action="copy-id" data-id="${esc(c.id)}">ID: ${esc(c.id)} (copiar)</button>
+        <div class="char-list-item-footer">
+          <button class="btn-copy-id" data-action="copy-id" data-id="${esc(c.id)}">ID: ${esc(c.id)} (copiar)</button>
+          <button class="btn-link danger" data-action="delete-character" data-path="${esc(c.path)}" data-sha="${esc(c.sha || "")}" data-name="${esc(c.name)}">apagar personagem</button>
+        </div>
       </div>`
     )
     .join("");
@@ -1665,9 +1668,9 @@ async function goToList() {
       jsonFiles.map(async (f) => {
         try {
           const result = await readJsonFile(f.path);
-          return { id: f.name.replace(".json", ""), name: result?.data?.basic?.name || f.name, path: f.path };
+          return { id: f.name.replace(".json", ""), name: result?.data?.basic?.name || f.name, path: f.path, sha: f.sha };
         } catch {
-          return { id: f.name.replace(".json", ""), name: f.name, path: f.path };
+          return { id: f.name.replace(".json", ""), name: f.name, path: f.path, sha: f.sha };
         }
       })
     );
@@ -1676,6 +1679,19 @@ async function goToList() {
     listError = "Não foi possível carregar seus personagens: " + (err.message || err);
   }
   render();
+}
+
+async function deleteCharacter(path, sha, name) {
+  if (!confirm(`Apagar o personagem "${name}"? Essa ação não pode ser desfeita.`)) return;
+  listError = "";
+  try {
+    await deleteFile(path, sha, `chore: apaga personagem ${name}`);
+    characterList = characterList.filter((c) => c.path !== path);
+    render();
+  } catch (err) {
+    listError = "Não foi possível apagar o personagem: " + (err.message || err);
+    render();
+  }
 }
 
 async function goToCampaigns() {
@@ -1907,6 +1923,10 @@ function attachEvents() {
 
   document.querySelectorAll("[data-action='open-character']").forEach((btn) => {
     btn.addEventListener("click", () => openCharacter(btn.dataset.path));
+  });
+
+  document.querySelectorAll("[data-action='delete-character']").forEach((btn) => {
+    btn.addEventListener("click", () => deleteCharacter(btn.dataset.path, btn.dataset.sha, btn.dataset.name));
   });
 
   document.querySelectorAll("[data-action='nav-characters']").forEach((btn) => {
