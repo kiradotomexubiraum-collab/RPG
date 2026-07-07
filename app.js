@@ -115,6 +115,37 @@ let campaignHistoryLoading = false;
 let campaignHistoryEntries = [];
 
 let monsterFormError = "";
+let showBestiaryPicker = false;
+let bestiaryPickerError = "";
+
+// ---------- Ficha de monstro (aberta a partir de um monstro da campanha) ----------
+let currentMonster = null;
+let currentMonsterId = null;
+let monsterSheetReadOnly = false;
+let monsterActiveTab = "attacks";
+let monsterLastRenderedTab = null;
+let monsterSaveTimer = null;
+let monsterSaveStatus = "";
+let monsterSaveError = "";
+
+// Preenche campos que faltarem num monstro (compatibilidade com monstros
+// criados antes desta versão, que só tinham nome/nível/hp/mp).
+function normalizeMonster(m) {
+  if (m.hpMax === undefined) m.hpMax = m.hp || 0;
+  if (m.hp === undefined) m.hp = 0;
+  if (m.mpMax === undefined) m.mpMax = m.mp || 0;
+  if (m.mp === undefined) m.mp = 0;
+  if (m.level === undefined) m.level = 1;
+  if (m.imageUrl === undefined) m.imageUrl = "";
+  if (m.description === undefined) m.description = "";
+  if (m.rewardXp === undefined) m.rewardXp = 0;
+  if (m.rewardMp === undefined) m.rewardMp = 0;
+  if (!Array.isArray(m.skills)) m.skills = [];
+  if (!Array.isArray(m.attacks)) m.attacks = [];
+  if (!Array.isArray(m.abilities)) m.abilities = [];
+  if (m.bestiaryId === undefined) m.bestiaryId = null;
+  return m;
+}
 
 // ---------- Livro do sistema (arquivo único, upload livre por enquanto) ----------
 let systemBookMeta = null;
@@ -462,6 +493,7 @@ async function loadCampaignDashboard(slug) {
   const linkedRes = await readJsonFile(`campaigns/${slug}/linked_characters.json`);
   const monstersRes = await readJsonFile(`campaigns/${slug}/monsters.json`);
   const linkedHydrated = await hydrateLinkedCharacters(linkedRes.data);
+  const monsters = (monstersRes ? monstersRes.data : []).map(normalizeMonster);
   return {
     campaign: campaignRes.data,
     campaignSha: campaignRes.sha,
@@ -470,7 +502,7 @@ async function loadCampaignDashboard(slug) {
     linked: linkedRes.data,
     linkedSha: linkedRes.sha,
     linkedHydrated,
-    monsters: monstersRes ? monstersRes.data : [],
+    monsters,
     monstersSha: monstersRes ? monstersRes.sha : null,
   };
 }
@@ -805,6 +837,10 @@ function renderDie(sides, value, extraClass) {
 // assim tanto o jogador quanto o mestre (quando abre a ficha vinculada na campanha)
 // enxergam o mesmo histórico.
 function pushRollHistory(entry) {
+  // Só persiste no histórico da própria ficha quando quem rolou está de fato
+  // na tela da ficha de personagem (evita gravar rolagens de monstro, feitas
+  // em outra tela, dentro do histórico de um personagem carregado em memória).
+  if (screen !== "sheet" || !character) return;
   if (!character.rollHistory) character.rollHistory = [];
   character.rollHistory.unshift({
     time: new Date().toISOString(),
@@ -1173,7 +1209,10 @@ function renderCampaignDashboard() {
           </div>
           ${m.description ? `<p class="monster-desc">${esc(m.description)}</p>` : ""}
         </div>
-        ${isGm ? `<button class="btn-link danger" data-action="remove-monster" data-id="${esc(m.id)}">remover</button>` : ""}
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button class="btn btn-teal" data-action="open-monster-sheet" data-id="${esc(m.id)}">abrir ficha</button>
+          ${isGm ? `<button class="btn-link danger" data-action="remove-monster" data-id="${esc(m.id)}">remover</button>` : ""}
+        </div>
       </li>`
     )
     .join("");
@@ -1257,8 +1296,33 @@ function renderCampaignDashboard() {
           isGm
             ? `
         <p class="helper-text" style="margin:8px 0;">Só o mestre pode adicionar monstros à campanha.</p>
+
+        <button class="btn-add" data-action="toggle-bestiary-picker">${ICONS.plus} adicionar do bestiário</button>
+        ${
+          showBestiaryPicker
+            ? `
+        <div class="bulk-monster-box">
+          ${bestiaryPickerError ? `<p class="login-error">${esc(bestiaryPickerError)}</p>` : ""}
+          ${
+            bestiaryLoading
+              ? `<p class="helper-text">Carregando bestiário...</p>`
+              : bestiaryList.length
+                ? `
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select id="bestiary-picker-select" style="flex:1;">
+              ${bestiaryList.map((m) => `<option value="${esc(m.id)}">${esc(m.name)} (Nv. ${esc(String(m.level ?? 1))})</option>`).join("")}
+            </select>
+            <button class="btn btn-teal" data-action="do-add-monster-from-bestiary">adicionar</button>
+          </div>
+          <p class="helper-text" style="margin-top:6px;">Copia nome, nível, HP, MP, imagem e descrição do bestiário — dá pra ajustar tudo depois na ficha do monstro.</p>`
+                : `<p class="helper-text">O bestiário ainda não tem nenhum monstro cadastrado.</p>`
+          }
+        </div>`
+            : ""
+        }
+
         ${monsterFormError ? `<p class="login-error">${esc(monsterFormError)}</p>` : ""}
-        <div class="monster-form">
+        <div class="monster-form" style="margin-top:10px;">
           <input type="text" id="monster-name-input" placeholder="Nome" />
           <input type="number" id="monster-level-input" placeholder="Nível" style="width:80px;" />
           <input type="number" id="monster-hp-input" placeholder="HP" style="width:80px;" />
@@ -1791,6 +1855,181 @@ function renderAttacks() {
     ${rows}<button class="btn-add" data-action="add-attack">${ICONS.plus} adicionar ataque</button>`;
 }
 
+// ---------- Ficha de monstro (mesmo layout visual da ficha de personagem) ----------
+const MONSTER_TABS = [
+  { id: "attacks", label: "Ataques", icon: "swords" },
+  { id: "abilities", label: "Habilidades", icon: "wand" },
+];
+
+function renderMonsterBasic() {
+  const m = currentMonster;
+  return `
+    <div class="avatar-row" style="align-items:flex-start;">
+      <label class="avatar avatar-upload" style="width:110px;height:110px;font-size:38px;" title="Clique para escolher uma foto do seu dispositivo">
+        ${m.imageUrl ? `<img src="${esc(m.imageUrl)}" alt="">` : ICONS.swords}
+        <input type="file" accept="image/*" data-photo-bind-monster="imageUrl" hidden />
+      </label>
+      <div style="flex:1;">
+        ${m.imageUrl ? `<button class="btn-link danger" type="button" data-action="clear-monster-photo" style="display:block;margin-bottom:6px;">remover foto</button>` : ""}
+        <label class="field">
+          <span class="field-label">Nome do monstro</span>
+          <input type="text" data-mbind="name" value="${esc(m.name)}" />
+        </label>
+        <label class="field">
+          <span class="field-label">Nível</span>
+          <input type="number" data-mbind="level" data-numeric="true" value="${m.level}" style="width:90px;" />
+        </label>
+      </div>
+    </div>
+    <label class="field" style="margin-top:8px;">
+      <span class="field-label">Descrição</span>
+      <textarea rows="3" data-mbind="description" placeholder="Aparência, comportamento, fraquezas...">${esc(m.description || "")}</textarea>
+    </label>`;
+}
+
+function renderMonsterResources() {
+  const m = currentMonster;
+  function bar(label, currentKey, maxKey, color, textClass) {
+    const current = m[currentKey] || 0;
+    const max = m[maxKey] || 0;
+    const pct = max > 0 ? Math.max(0, Math.min(100, (current / max) * 100)) : 0;
+    const tc = textClass || "";
+    return `
+      <div class="bar-block bar-block-compact">
+        <div class="bar-top">
+          <span class="field-label ${tc}" style="margin:0;">${label}</span>
+          <span class="${tc}" style="font-family:'Special Elite',monospace;font-size:13px;">${current} / ${max}</span>
+        </div>
+        <div class="bar-track bar-track-compact"><div class="bar-fill" style="width:${pct}%;background:${color};"></div></div>
+        <div class="bar-inputs">
+          <span>atual</span>
+          <input type="number" class="${tc}" data-mbind="${currentKey}" data-numeric="true" value="${current}" />
+          <span>máx.</span>
+          <input type="number" class="${tc}" data-mbind="${maxKey}" data-numeric="true" value="${max}" />
+        </div>
+      </div>`;
+  }
+  return `
+    ${bar("HP", "hp", "hpMax", "var(--stamp)", "hp-value")}
+    ${bar("MP", "mp", "mpMax", "var(--teal)")}
+    <div class="sidebar-divider"></div>
+    <span class="field-label" style="display:block;margin-bottom:6px;">Recompensa ao derrotar</span>
+    <div class="grid-2">
+      <label class="field">
+        <span class="field-label gold-value">XP dado</span>
+        <input type="number" class="gold-value" data-mbind="rewardXp" data-numeric="true" value="${m.rewardXp || 0}" />
+      </label>
+      <label class="field">
+        <span class="field-label">MP dado</span>
+        <input type="number" data-mbind="rewardMp" data-numeric="true" value="${m.rewardMp || 0}" />
+      </label>
+    </div>`;
+}
+
+function renderMonsterSkills() {
+  const rows = (currentMonster.skills || [])
+    .map(
+      (s) => `
+      <div class="skill-row" data-id="${s.id}">
+        <input type="text" class="skill-name" data-mlist="skills" data-id="${s.id}" data-field="name" value="${esc(s.name)}" />
+        <div class="skill-row-controls">
+          <input type="number" class="buff" data-mlist="skills" data-id="${s.id}" data-field="bonus" data-numeric="true" value="${s.bonus || 0}" title="Bônus total do teste (1d20 + bônus)" placeholder="bônus" />
+          <button class="dice-btn" data-action="roll-monster-skill" data-id="${s.id}" title="Rolar 1d20">${ICONS.dice}</button>
+          <button class="trash-btn" data-action="remove-monster-skill" data-id="${s.id}">${ICONS.trash}</button>
+        </div>
+      </div>`
+    )
+    .join("");
+  return `
+    <p class="helper-text" style="margin-bottom:10px;">Perícias do monstro: nome + bônus direto (1d20 + bônus).</p>
+    ${rows}<button class="btn-add" data-action="add-monster-skill">${ICONS.plus} adicionar perícia</button>`;
+}
+
+function renderMonsterAttacks() {
+  const rows = (currentMonster.attacks || [])
+    .map(
+      (a) => `
+      <div class="attack-row" data-id="${a.id}">
+        <input type="text" data-mlist="attacks" data-id="${a.id}" data-field="name" value="${esc(a.name)}" style="flex:1;font-weight:600;" />
+        <input type="number" class="buff" data-mlist="attacks" data-id="${a.id}" data-field="testBonus" data-numeric="true" value="${a.testBonus || 0}" style="width:56px;" title="Bônus no teste (1d20)" placeholder="bônus" />
+        <input type="text" class="dice" data-mlist="attacks" data-id="${a.id}" data-field="dice" value="${esc(a.dice)}" title="Dado de dano" />
+        <input type="text" data-mlist="attacks" data-id="${a.id}" data-field="critRange" value="${esc(a.critRange)}" style="width:56px;text-align:center;" title="Faixa de crítico (ex: 20 ou 19-20)" />
+        <input type="text" data-mlist="attacks" data-id="${a.id}" data-field="critMultiplier" value="${esc(a.critMultiplier || "")}" style="width:44px;text-align:center;" placeholder="×2" title="Multiplicador de dano no crítico" />
+        <button class="dice-btn" data-action="roll-monster-attack" data-id="${a.id}" title="Testar ataque">${ICONS.dice}</button>
+        <button class="trash-btn" data-action="remove-monster-attack" data-id="${a.id}">${ICONS.trash}</button>
+      </div>`
+    )
+    .join("");
+  return `
+    <p class="helper-text" style="margin-bottom:10px;">Ataque do monstro: bônus no teste (1d20 + bônus) e dado de dano, com crítico configurável.</p>
+    ${rows}<button class="btn-add" data-action="add-monster-attack">${ICONS.plus} adicionar ataque</button>`;
+}
+
+function renderMonsterAbilities() {
+  const rows = (currentMonster.abilities || [])
+    .map(
+      (a) => `
+      <div class="card-box" data-id="${a.id}">
+        <div class="card-box-header">
+          <input type="text" data-mlist="abilities" data-id="${a.id}" data-field="name" value="${esc(a.name)}" />
+          <button class="trash-btn" data-action="remove-monster-ability" data-id="${a.id}">${ICONS.trash}</button>
+        </div>
+        <textarea rows="2" data-mlist="abilities" data-id="${a.id}" data-field="description" placeholder="O que essa habilidade faz...">${esc(a.description || "")}</textarea>
+      </div>`
+    )
+    .join("");
+  return `${rows}<button class="btn-add" data-action="add-monster-ability">${ICONS.plus} adicionar habilidade</button>`;
+}
+
+function renderMonsterTabContent() {
+  switch (monsterActiveTab) {
+    case "attacks": return renderMonsterAttacks();
+    case "abilities": return renderMonsterAbilities();
+    default: return "";
+  }
+}
+
+function renderMonsterSheet() {
+  if (!currentMonster) return `<div class="center-box"><p>Carregando monstro...</p></div>`;
+  const tabsHtml = MONSTER_TABS.map(
+    (t) => `
+    <button class="tab-btn ${monsterActiveTab === t.id ? "active" : ""}" data-mtab="${t.id}">
+      ${ICONS[t.icon]} ${t.label}
+    </button>`
+  ).join("");
+
+  return `
+    <div class="sheet">
+      <div class="sheet-topbar">
+        <div class="sheet-topbar-left">
+          <span class="eyebrow">Ficha de Monstro</span>
+          <span id="monster-save-indicator" class="save-indicator"></span>
+        </div>
+        <div class="sheet-topbar-right">
+          <span class="stamp">campanha</span>
+          <button class="btn-back" data-action="back-to-campaign-from-monster">← voltar para campanha</button>
+        </div>
+      </div>
+      ${monsterSheetReadOnly ? `<div class="readonly-banner">👁 Somente leitura — só o mestre da campanha pode editar monstros.</div>` : ""}
+      <div class="sheet-body ${monsterSheetReadOnly ? "readonly-lock" : ""}">
+        <aside class="sheet-col sheet-col-left">
+          <div class="sidebar-section">${renderMonsterBasic()}</div>
+          <div class="sidebar-divider"></div>
+          <div class="sidebar-section">${renderMonsterResources()}</div>
+        </aside>
+        <div class="sheet-col sheet-col-mid">
+          <h2 class="col-title">${ICONS.sparkles} Perícias</h2>
+          ${renderMonsterSkills()}
+        </div>
+        <div class="sheet-col sheet-col-right">
+          <div class="tabs tabs-inline">${tabsHtml}</div>
+          <div class="tab-content ${monsterActiveTab !== monsterLastRenderedTab ? "tab-glitch" : ""}">${renderMonsterTabContent()}</div>
+          ${(monsterLastRenderedTab = monsterActiveTab) && ""}
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderTabContent() {
   switch (activeTab) {
     case "class": return renderClass();
@@ -1925,6 +2164,7 @@ function render() {
   else if (screen === "bestiary") html = renderBestiary();
   else if (screen === "system") html = renderSystemBook();
   else if (screen === "sheet") html = renderSheet();
+  else if (screen === "monster-sheet") html = renderMonsterSheet();
 
   app.innerHTML =
     html +
@@ -2051,6 +2291,117 @@ async function goToBestiary() {
   render();
 }
 
+// Abre a ficha de um monstro já adicionado à campanha atual. Só o mestre
+// edita; qualquer outro membro vê em modo leitura (mesmo esquema da ficha
+// de personagem).
+async function openMonsterSheet(monsterId) {
+  const user = getStoredUser();
+  const isGm = !!(currentCampaign && currentCampaign.members.some((m) => m.username === user.login && m.role === "gm"));
+  const found = currentCampaign && (currentCampaign.monsters || []).find((x) => x.id === monsterId);
+  if (!found) return;
+  monsterSheetReadOnly = !isGm;
+  currentMonster = normalizeMonster(found);
+  currentMonsterId = monsterId;
+  monsterActiveTab = "attacks";
+  monsterLastRenderedTab = null;
+  monsterSaveStatus = "";
+  screen = "monster-sheet";
+  render();
+}
+
+function scheduleMonsterSave() {
+  if (monsterSheetReadOnly) return;
+  monsterSaveStatus = "editando";
+  clearTimeout(monsterSaveTimer);
+  monsterSaveTimer = setTimeout(performMonsterSave, 1200);
+  updateMonsterSaveIndicator();
+}
+
+async function performMonsterSave() {
+  if (!currentMonster || !currentCampaignSlug) return;
+  monsterSaveStatus = "salvando";
+  updateMonsterSaveIndicator();
+  try {
+    const res = await readJsonFile(`campaigns/${currentCampaignSlug}/monsters.json`);
+    const list = res ? res.data : [];
+    const idx = list.findIndex((m) => m.id === currentMonster.id);
+    if (idx >= 0) list[idx] = currentMonster;
+    else list.push(currentMonster);
+    await writeJsonFile(`campaigns/${currentCampaignSlug}/monsters.json`, list, res ? res.sha : null, `chore: atualiza monstro "${currentMonster.name}"`);
+    if (currentCampaign) currentCampaign.monsters = list;
+    monsterSaveStatus = "salvo";
+  } catch (err) {
+    monsterSaveStatus = "erro";
+    monsterSaveError = err.message || String(err);
+  }
+  updateMonsterSaveIndicator();
+}
+
+function updateMonsterSaveIndicator() {
+  const el = document.getElementById("monster-save-indicator");
+  if (!el) return;
+  const map = {
+    editando: "Editando...",
+    salvando: "Salvando no GitHub...",
+    salvo: "Salvo ✓",
+    erro: `Erro ao salvar: ${esc(monsterSaveError)}`,
+    "": "",
+  };
+  el.textContent = map[monsterSaveStatus] || "";
+  el.className = "save-indicator " + (monsterSaveStatus === "erro" ? "save-error" : "");
+}
+
+// Testes de perícia/ataque de monstro: reaproveita a mesma mecânica visual
+// (animação, som, crítico/falha crítica) das rolagens de personagem, mas sem
+// persistir num histórico próprio — o monstro não tem ficha de histórico.
+function doMonsterSkillRoll(skill) {
+  doRoll("1d20", Number(skill.bonus || 0), `${currentMonster.name} — ${skill.name}`);
+}
+
+function doMonsterAttackTest(attack) {
+  const testRoll = rollDice("1d20");
+  if (!testRoll) return;
+  const testBonus = Number(attack.testBonus || 0);
+  const testTotal = testRoll.total + testBonus;
+
+  const dmgRoll = rollDice(attack.dice);
+  if (!dmgRoll) {
+    toast = { label: "Erro", roll: `Notação de dano inválida: "${attack.dice}"`, total: null };
+    render();
+    setTimeout(() => { toast = null; render(); }, 3000);
+    return;
+  }
+
+  const threshold = parseCritThreshold(attack.critRange);
+  const multiplier = parseFloat(attack.critMultiplier) || 1;
+  const isCrit = threshold !== null && testRoll.rolls.some((r) => r >= threshold);
+  const isFumble = !isCrit && isNat1D20(testRoll);
+
+  let dmgTotal = dmgRoll.total;
+  let critNote = "";
+  if (isCrit && multiplier > 1) {
+    const diceSum = dmgRoll.rolls.reduce((a, b) => a + b, 0);
+    dmgTotal = diceSum * multiplier + dmgRoll.mod;
+    critNote = ` — CRÍTICO ×${multiplier}!`;
+  } else if (isCrit) {
+    critNote = " — CRÍTICO!";
+  } else if (isFumble) {
+    critNote = " — FALHA CRÍTICA!";
+    dmgTotal = 0;
+  }
+
+  const finalToast = {
+    label: `${currentMonster.name} — ${attack.name}${critNote}`,
+    roll: `Teste: 1d20 → [${testRoll.rolls.join(", ")}] ${testBonus >= 0 ? "+" : ""}${testBonus} = ${testTotal}  |  Dano: ${dmgRoll.notation} → [${dmgRoll.rolls.join(", ")}]`,
+    total: dmgTotal,
+    crit: isCrit,
+    fumble: isFumble,
+    sides: 20,
+    diceResults: testRoll.rolls,
+  };
+  animateRoll(`${currentMonster.name} — ${attack.name}`, 20, 1, finalToast);
+}
+
 async function goToSystemBook() {
   screen = "system";
   systemBookError = "";
@@ -2100,6 +2451,8 @@ async function openCampaignDashboardScreen(slug) {
   linkSearchedOwner = "";
   linkSearchError = "";
   showManualLink = false;
+  showBestiaryPicker = false;
+  bestiaryPickerError = "";
   render();
   try {
     currentCampaign = await loadCampaignDashboard(slug);
@@ -2515,6 +2868,129 @@ function attachEvents() {
     btn.addEventListener("click", () => {
       character.basic.photoUrl = "";
       scheduleSave();
+      render();
+    });
+  });
+
+  // ---------- Ficha de monstro ----------
+  document.querySelectorAll("[data-mbind]").forEach((input) => {
+    const eventName = input.tagName === "TEXTAREA" ? "input" : "input";
+    input.addEventListener(eventName, () => {
+      if (!currentMonster) return;
+      const key = input.dataset.mbind;
+      currentMonster[key] = input.dataset.numeric ? Number(input.value || 0) : input.value;
+      scheduleMonsterSave();
+    });
+  });
+
+  document.querySelectorAll("[data-photo-bind-monster]").forEach((fileInput) => {
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file || !currentMonster) return;
+      let dataUrl;
+      try {
+        dataUrl = await readImageFileAsDataUrl(file);
+      } catch (err) {
+        return;
+      }
+      currentMonster[fileInput.dataset.photoBindMonster] = dataUrl;
+      scheduleMonsterSave();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='clear-monster-photo']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!currentMonster) return;
+      currentMonster.imageUrl = "";
+      scheduleMonsterSave();
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-mlist]").forEach((input) => {
+    const eventName = input.dataset.select === "true" ? "change" : "input";
+    input.addEventListener(eventName, () => {
+      if (!currentMonster) return;
+      const list = currentMonster[input.dataset.mlist];
+      const item = list && list.find((x) => x.id === input.dataset.id);
+      if (!item) return;
+      item[input.dataset.field] = input.dataset.numeric ? Number(input.value || 0) : input.value;
+      scheduleMonsterSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-monster-skill']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!currentMonster) return;
+      currentMonster.skills.push({ id: uid(), name: "Nova Perícia", bonus: 0 });
+      render();
+      scheduleMonsterSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-monster-attack']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!currentMonster) return;
+      currentMonster.attacks.push({ id: uid(), name: "Novo Ataque", testBonus: 0, dice: "1d6", critRange: "20", critMultiplier: "2" });
+      render();
+      scheduleMonsterSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='add-monster-ability']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!currentMonster) return;
+      currentMonster.abilities.push({ id: uid(), name: "Nova Habilidade", description: "" });
+      render();
+      scheduleMonsterSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='remove-monster-skill']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!currentMonster) return;
+      currentMonster.skills = currentMonster.skills.filter((x) => x.id !== btn.dataset.id);
+      render();
+      scheduleMonsterSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='remove-monster-attack']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!currentMonster) return;
+      currentMonster.attacks = currentMonster.attacks.filter((x) => x.id !== btn.dataset.id);
+      render();
+      scheduleMonsterSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='remove-monster-ability']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!currentMonster) return;
+      currentMonster.abilities = currentMonster.abilities.filter((x) => x.id !== btn.dataset.id);
+      render();
+      scheduleMonsterSave();
+    });
+  });
+
+  document.querySelectorAll("[data-action='roll-monster-skill']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const s = currentMonster.skills.find((x) => x.id === btn.dataset.id);
+      if (s) doMonsterSkillRoll(s);
+    });
+  });
+
+  document.querySelectorAll("[data-action='roll-monster-attack']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const a = currentMonster.attacks.find((x) => x.id === btn.dataset.id);
+      if (a) doMonsterAttackTest(a);
+    });
+  });
+
+  document.querySelectorAll("[data-mtab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      monsterActiveTab = btn.dataset.mtab;
       render();
     });
   });
@@ -2949,6 +3425,65 @@ function attachEvents() {
         campaignDashError = "Falha ao remover monstro: " + (err.message || err);
       }
       render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='toggle-bestiary-picker']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      showBestiaryPicker = !showBestiaryPicker;
+      bestiaryPickerError = "";
+      if (showBestiaryPicker && bestiaryList.length === 0) {
+        bestiaryLoading = true;
+        render();
+        try {
+          const res = await loadBestiary();
+          bestiaryList = res.data;
+          bestiarySha = res.sha;
+        } catch (err) {
+          bestiaryPickerError = "Falha ao carregar o bestiário: " + (err.message || err);
+        }
+        bestiaryLoading = false;
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='do-add-monster-from-bestiary']").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const sel = document.getElementById("bestiary-picker-select");
+      if (!sel || !sel.value) return;
+      const src = bestiaryList.find((m) => m.id === sel.value);
+      if (!src) return;
+      const monster = normalizeMonster({
+        name: src.name,
+        level: src.level ?? 1,
+        hp: src.hp ?? 0,
+        hpMax: src.hp ?? 0,
+        mp: src.mp ?? 0,
+        mpMax: src.mp ?? 0,
+        imageUrl: src.imageUrl || "",
+        description: src.description || "",
+        bestiaryId: src.id,
+      });
+      try {
+        await addMonster(currentCampaignSlug, monster);
+        showBestiaryPicker = false;
+        currentCampaign = await loadCampaignDashboard(currentCampaignSlug);
+      } catch (err) {
+        bestiaryPickerError = "Falha ao adicionar monstro do bestiário: " + (err.message || err);
+      }
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-action='open-monster-sheet']").forEach((btn) => {
+    btn.addEventListener("click", () => openMonsterSheet(btn.dataset.id));
+  });
+
+  document.querySelectorAll("[data-action='back-to-campaign-from-monster']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      clearTimeout(monsterSaveTimer);
+      if (currentCampaignSlug) openCampaignDashboardScreen(currentCampaignSlug);
     });
   });
 
