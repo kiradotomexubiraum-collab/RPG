@@ -282,7 +282,6 @@ function emptyCharacter() {
     skills,
     abilities: [],
     items: [],
-    attacks: [{ id: uid(), name: "Faca de Combate", dice: "1d6+1", critRange: "20", critMultiplier: "2", skillId: lutaId }],
     rollHistory: [],
   };
 }
