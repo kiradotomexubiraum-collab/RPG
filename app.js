@@ -1078,6 +1078,14 @@ function renderCampaigns() {
           <span>${esc(c.name)} <span class="role-tag">${c.role === "gm" ? "mestre" : "jogador"}</span></span>
           <span class="char-list-arrow">→</span>
         </button>
+        ${
+          c.role === "gm"
+            ? `
+        <div class="char-list-item-footer">
+          <button class="btn-link danger" data-action="delete-campaign" data-slug="${esc(c.slug)}" data-name="${esc(c.name)}">apagar campanha</button>
+        </div>`
+            : ""
+        }
       </div>`
     )
     .join("");
@@ -2234,7 +2242,9 @@ async function deleteCampaign(slug, name) {
     currentCampaign = null;
     goToCampaigns();
   } catch (err) {
-    campaignDashError = "Não foi possível apagar a campanha: " + (err.message || err);
+    const msg = "Não foi possível apagar a campanha: " + (err.message || err);
+    campaignDashError = msg;
+    campaignsError = msg;
     render();
   }
 }
