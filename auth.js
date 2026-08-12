@@ -1,61 +1,91 @@
-const AUTH_TOKEN_KEY = "rpg_gh_token";
-const AUTH_USER_KEY = "rpg_gh_user";
+const clientId = 'SEU_CLIENT_ID';
 
-function getStoredToken() {
-  return localStorage.getItem(AUTH_TOKEN_KEY);
-}
-
-function getStoredUser() {
-  const raw = localStorage.getItem(AUTH_USER_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
-
-function clearAuth() {
-  localStorage.removeItem(AUTH_TOKEN_KEY);
-  localStorage.removeItem(AUTH_USER_KEY);
-}
-
-function authHeaders() {
-  const token = getStoredToken();
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/vnd.github+json",
-  };
-}
-
-// Valida o token chamando /user e confere acesso ao repositório configurado.
-// Retorna { ok: true, user } ou { ok: false, error }.
-async function validateAndStoreToken(token) {
-  let userRes;
+async function startDeviceFlow() {
   try {
-    userRes = await fetch("https://api.github.com/user", {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+    const response = await fetch('https://github.com/login/device/code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: clientId,
+        scope: 'read:user'
+      })
     });
-  } catch (e) {
-    return { ok: false, error: "Não foi possível conectar ao GitHub. Confira sua internet." };
-  }
 
-  if (userRes.status === 401) {
-    return { ok: false, error: "Token inválido ou expirado." };
+    if (response.ok) {
+      const data = await response.json();
+      
+      console.log(`Acesse ${data.verification_uri} e insira o código: ${data.user_code}`);
+      
+      return data;
+    } else {
+      throw new Error('Falha ao iniciar autenticação.');
+    }
+  } catch (error) {
+    console.error('Erro:', error);
   }
-  if (!userRes.ok) {
-    return { ok: false, error: `Erro ao validar token (status ${userRes.status}).` };
+}
+
+async function checkDeviceFlowStatus(deviceCode) {
+  try {
+    const response = await fetch('https://github.com/login/device/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: clientId,
+        device_code: deviceCode,
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code'
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      
+      return data;
+    } else {
+      throw new Error('Falha ao verificar status da autenticação.');
+    }
+  } catch (error) {
+    console.error('Erro:', error);
   }
+}
 
-  const user = await userRes.json();
-
-  const repoRes = await fetch(
-    `https://api.github.com/repos/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!repoRes.ok) {
-    return {
-      ok: false,
-      error: `Token válido, mas sem acesso ao repositório "${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}". Confira o nome em config.js e a permissão do token.`,
-    };
+async function fetchAccessToken(deviceCode) {
+  try {
+    const params = await fetchAccessToken(deviceCode);
+    
+    localStorage.setItem('token', params.get('access_token'));
+    
+    return true;
+  } catch (error) {
+    console.error('Erro:', error.message);
   }
+}
 
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
-  localStorage.setItem(AUTH_USER_KEY, JSON.stringify({ login: user.login, avatar_url: user.avatar_url }));
-  return { ok: true, user };
+export async function iniciarAutenticacao() {
+  const resultado = await startDeviceFlow();
+  
+  if (resultado) {
+    console.log(`Acesse ${resultado.verification_uri} e insira o código: ${resultado.user_code}`);
+    
+    // Verificar periodicamente o status da autenticação
+    checkStatusPeriodicamente(resultado.device_code);
+  }
+}
+
+function checkStatusPeriodicamente(deviceCode) {
+  let intervalId = setInterval(() => {
+    checkDeviceFlowStatus(deviceCode).then(resultado => {
+      if (resultado.status === 'ready') {
+        console.log('Autenticação concluída!');
+        
+        clearInterval(intervalId); // Parar de verificar quando a autenticação é bem-sucedida
+        fetchAccessToken(deviceCode);
+      } else if (resultado.status !== 'pending') {
+        clearInterval(intervalId); // Parar de verificar se houve erro na autenticação
+        console.error('Erro na autenticação:', resultado.error_description);
+      }
+    });
+  }, 5000);
+
+  return intervalId;
 }
