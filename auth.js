@@ -1,3 +1,4 @@
+// Implementação da autenticação via OAuth com GitHub
 const clientId = 'SEU_CLIENT_ID';
 
 async function startDeviceFlow() {
@@ -13,9 +14,7 @@ async function startDeviceFlow() {
 
     if (response.ok) {
       const data = await response.json();
-      
       console.log(`Acesse ${data.verification_uri} e insira o código: ${data.user_code}`);
-      
       return data;
     } else {
       throw new Error('Falha ao iniciar autenticação.');
@@ -39,7 +38,6 @@ async function checkDeviceFlowStatus(deviceCode) {
 
     if (response.ok) {
       const data = await response.json();
-      
       return data;
     } else {
       throw new Error('Falha ao verificar status da autenticação.');
@@ -51,11 +49,23 @@ async function checkDeviceFlowStatus(deviceCode) {
 
 async function fetchAccessToken(deviceCode) {
   try {
-    const params = await fetchAccessToken(deviceCode);
-    
-    localStorage.setItem('token', params.get('access_token'));
-    
-    return true;
+    const params = await checkDeviceFlowStatus(deviceCode);
+    if (params.status === 'ready') {
+      const response = await fetch(`https://github.com/login/oauth/access_token?client_id=${clientId}&device_code=${deviceCode}&grant_type=urn:ietf:params:oauth:grant-type:device_code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (response.ok) {
+        const data = await response.text();
+        localStorage.setItem('token', new URLSearchParams(data).get('access_token'));
+        return true;
+      } else {
+        throw new Error('Falha ao obter token.');
+      }
+    }
+
+    return false;
   } catch (error) {
     console.error('Erro:', error.message);
   }
@@ -63,10 +73,8 @@ async function fetchAccessToken(deviceCode) {
 
 export async function iniciarAutenticacao() {
   const resultado = await startDeviceFlow();
-  
   if (resultado) {
     console.log(`Acesse ${resultado.verification_uri} e insira o código: ${resultado.user_code}`);
-    
     // Verificar periodicamente o status da autenticação
     checkStatusPeriodicamente(resultado.device_code);
   }
@@ -77,7 +85,6 @@ function checkStatusPeriodicamente(deviceCode) {
     checkDeviceFlowStatus(deviceCode).then(resultado => {
       if (resultado.status === 'ready') {
         console.log('Autenticação concluída!');
-        
         clearInterval(intervalId); // Parar de verificar quando a autenticação é bem-sucedida
         fetchAccessToken(deviceCode);
       } else if (resultado.status !== 'pending') {
@@ -86,6 +93,4 @@ function checkStatusPeriodicamente(deviceCode) {
       }
     });
   }, 5000);
-
-  return intervalId;
 }
