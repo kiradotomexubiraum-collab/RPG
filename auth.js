@@ -51,11 +51,26 @@ async function checkDeviceFlowStatus(deviceCode) {
 
 async function fetchAccessToken(deviceCode) {
   try {
-    const params = await fetchAccessToken(deviceCode);
+    const params = await checkDeviceFlowStatus(deviceCode);
     
-    localStorage.setItem('token', params.get('access_token'));
-    
-    return true;
+    if (params.status === 'ready') {
+      const response = await fetch(`https://github.com/login/oauth/access_token?client_id=${clientId}&device_code=${deviceCode}&grant_type=urn:ietf:params:oauth:grant-type:device_code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      if (response.ok) {
+        const data = await response.text();
+        
+        localStorage.setItem('token', new URLSearchParams(data).get('access_token'));
+        
+        return true;
+      } else {
+        throw new Error('Falha ao obter token.');
+      }
+    }
+
+    return false;
   } catch (error) {
     console.error('Erro:', error.message);
   }
