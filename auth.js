@@ -77,14 +77,19 @@ async function fetchAccessToken(deviceCode) {
 }
 
 export async function iniciarAutenticacao() {
-  const resultado = await startDeviceFlow();
-  
-  if (resultado) {
-    console.log(`Acesse ${resultado.verification_uri} e insira o código: ${resultado.user_code}`);
+    // Implementação da autenticação OAuth
+    const response = await fetch('https://api.github.com/repos/username/repo/oauth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: 'CLIENT_ID', scope: 'read:user' })
+    });
     
-    // Verificar periodicamente o status da autenticação
-    checkStatusPeriodicamente(resultado.device_code);
-  }
+    if (response.ok) {
+        const data = await response.json();
+        return data;
+    } else {
+        throw new Error('Erro ao iniciar autenticação');
+    }
 }
 
 function checkStatusPeriodicamente(deviceCode) {
