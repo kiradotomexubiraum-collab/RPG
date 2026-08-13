@@ -17,9 +17,7 @@ async function startDeviceFlow() {
       console.log(`Acesse ${data.verification_uri} e insira o código: ${data.user_code}`);
       
       return data;
-    } else {
-      throw new Error('Falha ao iniciar autenticação.');
-    }
+    } else { throw new Error('Falha ao iniciar autenticação.'); }
   } catch (error) {
     console.error('Erro:', error);
   }
@@ -41,9 +39,7 @@ async function checkDeviceFlowStatus(deviceCode) {
       const data = await response.json();
       
       return data;
-    } else {
-      throw new Error('Falha ao verificar status da autenticação.');
-    }
+    } else { throw new Error('Falha ao verificar status da autenticação.'); }
   } catch (error) {
     console.error('Erro:', error);
   }
@@ -51,11 +47,15 @@ async function checkDeviceFlowStatus(deviceCode) {
 
 async function fetchAccessToken(deviceCode) {
   try {
-    const params = await fetchAccessToken(deviceCode);
+    const params = await checkDeviceFlowStatus(deviceCode).then(data => data.access_token ? { access_token: data.access_token } : null);
+
+    if (params) {
+      localStorage.setItem('token', params.get('access_token'));
+      
+      return true;
+    }
     
-    localStorage.setItem('token', params.get('access_token'));
-    
-    return true;
+    throw new Error('Falha ao obter token.');
   } catch (error) {
     console.error('Erro:', error.message);
   }
@@ -86,6 +86,6 @@ function checkStatusPeriodicamente(deviceCode) {
       }
     });
   }, 5000);
-
+  
   return intervalId;
 }
